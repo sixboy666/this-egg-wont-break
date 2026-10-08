@@ -311,6 +311,46 @@ const AU = {
     this.tone('sine', 440, t+0.02, 0.12, 0.3, this.sfxBus);
   },
 
+  // absurd reveal sound — wet rubber duck into a goofy honk
+  absurdHonk() {
+    if (!this.ac) return;
+    const t=this.ac.currentTime;
+    // rubber squeak
+    const sq=this.ac.createOscillator(), sg=this.ac.createGain();
+    sq.type='square'; sq.frequency.setValueAtTime(2000,t);
+    sq.frequency.exponentialRampToValueAtTime(800,t+0.12);
+    sg.gain.setValueAtTime(0.18,t);
+    sg.gain.exponentialRampToValueAtTime(0.001,t+0.15);
+    sq.connect(sg); sg.connect(this.sfxBus);
+    sq.start(t); sq.stop(t+0.17);
+    // cartoon honk
+    setTimeout(()=>{
+      if (!this.ac) return;
+      const t2=this.ac.currentTime;
+      for (let i=0;i<3;i++){
+        const o=this.ac.createOscillator(), g=this.ac.createGain();
+        o.type='sawtooth'; o.frequency.setValueAtTime(180+i*60,t2);
+        g.gain.setValueAtTime(0.2,t2);
+        g.gain.exponentialRampToValueAtTime(0.001,t2+0.25);
+        o.connect(g); g.connect(this.sfxBus);
+        o.start(t2); o.stop(t2+0.27);
+      }
+    },200);
+    // tiny boing
+    setTimeout(()=>{
+      if (!this.ac) return;
+      const t3=this.ac.currentTime;
+      const o=this.ac.createOscillator(), g=this.ac.createGain();
+      o.type='triangle'; o.frequency.setValueAtTime(400,t3);
+      o.frequency.exponentialRampToValueAtTime(600,t3+0.15);
+      o.frequency.exponentialRampToValueAtTime(200,t3+0.4);
+      g.gain.setValueAtTime(0.25,t3);
+      g.gain.exponentialRampToValueAtTime(0.001,t3+0.42);
+      o.connect(g); g.connect(this.sfxBus);
+      o.start(t3); o.stop(t3+0.45);
+    },420);
+  },
+
   whistleDown() {
     if (!this.ac) return;
     const t=this.ac.currentTime;
@@ -355,11 +395,14 @@ const game = {
   state: STATE.TITLE,
   scene: parseInt(localStorage.getItem('tewb_scene')||'0',10) || 0,
   best: parseInt(localStorage.getItem('tewb_best')||'0',10) || 0,
-  score:0, perfects:0,
+  score:0, perfects:0, combo:0, comboT:0,
   time:0, hitStop:0,
   banner:null, flash:0,
   camY:0, shake:0, zoom:1,
-  speedK:1, events:[]
+  speedK:1, events:[],
+  barrelRoll:0, rainbow:0, rainbowHue:0,
+  thought:null, thoughtT:0,
+  revealCount:0
 };
 
 /* ---------------- EGG ---------------- */
@@ -492,9 +535,11 @@ function banner(text, sub) { game.banner={text:text, sub:sub||'', t:0, dur:1.5};
 /* ---------------- FLOW ---------------- */
 function startRun() {
   if (window.L) window.L('startRun');
-  game.score=0; game.perfects=0; game.time=0; game.speedK=1;
+  game.score=0; game.perfects=0; game.combo=0; game.comboT=0;
+  game.time=0; game.speedK=1;
   game.camY=0; game.shake=0; game.zoom=1; game.flash=0;
-  game.events=[];
+  game.events=[]; game.barrelRoll=0; game.rainbow=0;
+  game.thought=null; game.thoughtT=0; game.revealCount=0;
   resetEgg();
   initPads();
   AU.tension=0; AU.seqIdx=0;
@@ -507,12 +552,29 @@ function tierFor(n) {
   return n;
 }
 const TIER_BANNERS = {
-  2:['IT SPINS NOW.','why'],
-  3:['SIDE EGG.','horizontal crimes'],
-  4:['BASKETBALL MODE.','dribble dribble'],
-  5:['IT HAS A FACE.','hello'],
-  6:['IT IS AVOIDING YOU.','the egg hates you']
+  2:['IT SPINS NOW.','why is it doing that'],
+  3:['SIDE EGG.','horizontal crimes against god'],
+  4:['BASKETBALL MODE.','dribble dribble yoink'],
+  5:['IT HAS A FACE.','it is looking at you'],
+  6:['IT IS AVOIDING YOU.','the egg hates you specifically']
 };
+const REVEAL_LINES = [
+  'sup.','deal with it.','i live here now.','you cannot kill me.','this shell is rented.','i do what i want.','nice try, buddy.','egg rights.','get owned.','touch grass.'
+];
+const DEATH_MSGS = [
+  ['IT IS A PANCAKE NOW.', 'the egg is fine. YOU lost.'],
+  ['SPLAT.', 'you did this to yourself.'],
+  ['EGG: 1   YOU: 0', 'absolute egg behavior'],
+  ['IT CHOSE VIOLENCE.', 'the egg wins again.'],
+  ['FLAT EGG TRUTH.', 'you were never the protagonist.'],
+  ['EGG STATUS: SMUG', 'it does not care.'],
+  ['Y O L K E D.', 'eggpeed out of existence.'],
+  ['GAME OVER EGG.', 'the egg is disappointed. not mad. just disappointed.'],
+  ['EGG-ZITED.', 'it left the building.'],
+  ['SHELVING IT.', 'the egg gave up on you.']
+];
+const THOUGHTS = ['why','no','again?','you suck at this','i am egg','stop','help','lol','bruh','nice','gg','why me','suffer','bone?','i tire','oh no','not this','really?','embarrassing','egg'];
+const COMBO_LINES = ['STYLISH!','DISGUSTING!','EGGCELLENT!','UNHINGED!','GROSS!','STOP!','BANNED!','ILLEGAL!','OH NO!','YIKES!','EGG!','TOO FAR!'];
 
 function doBounce(pad) {
   if (window.L) window.L('BOUNCE on padY='+(pad.y|0)+' padX='+(pad.x|0)+' eggX='+(egg.x|0));
@@ -568,7 +630,25 @@ function doBounce(pad) {
     egg.faceT=0.5;
   }
 
-  if (perfect) { game.perfects++; }
+  if (perfect) { game.perfects++; game.combo++; game.comboT=2.2; }
+  else game.combo=0;
+
+  // combo callout
+  if (game.combo>=3 && Math.random()<0.6) {
+    banner(COMBO_LINES[Math.floor(Math.random()*COMBO_LINES.length)], game.combo+' IN A ROW');
+  }
+
+  // random egg thought
+  if (Math.random()<0.18) {
+    game.thought=THOUGHTS[Math.floor(Math.random()*THOUGHTS.length)];
+    game.thoughtT=1.4;
+  }
+
+  // barrel roll chance on hard hits
+  if (hard && Math.random()<0.12) game.barrelRoll=1;
+
+  // rainbow chaos on high combo
+  if (game.combo>=5) { game.rainbow=1.5; }
 
   if (egg.tier!==prevTier && TIER_BANNERS[egg.tier]) {
     banner(TIER_BANNERS[egg.tier][0], TIER_BANNERS[egg.tier][1]);
@@ -580,17 +660,17 @@ function doBounce(pad) {
 
 function enterReveal() {
   game.state=STATE.REVEAL;
-  game.rv={t:0, phase:0, ducked:false, yoinked:false, closed:false};
+  game.revealCount++;
+  game.rv={t:0, phase:0, ducked:false, yoinked:false, closed:false, line:REVEAL_LINES[Math.floor(Math.random()*REVEAL_LINES.length)]};
   egg.vy=-60; egg.vx=0; egg.vr=0;
   if (egg.tier>=5){ egg.face='shock'; egg.faceT=9; }
   game.zoom=1.14; game.shake=18;
+  game.flash=0.6; game.barrelRoll=1;
   waves.push({x:egg.x,y:egg.y,r:10,max:220,t:0});
 }
 
 function finishReveal() {
-  // heal, escalate, continue
   egg.crack=0;
-  // animate cracks fading
   egg.cracks.forEach(c=>c.fade=true);
   setTimeout(()=>{ egg.cracks=[]; }, 650);
   game.speedK=Math.min(game.speedK+0.14, 2.1);
@@ -598,27 +678,34 @@ function finishReveal() {
   egg.vy=-bounceV();
   egg.sy=0.6; egg.sx=1.42;
   if (egg.tier>=5){ egg.face='happy'; egg.faceT=0.8; }
-  banner('IT REFUSES TO BREAK.','back in the shell');
+  // the reveal line text
+  banner(game.rv.line.toUpperCase(), 'it is still here');
   game.state=STATE.PLAY;
-  // random crazy event after a fake-out
-  maybeEvent();
+  // after 2nd+ reveal, escalate events
+  maybeEvent(game.revealCount);
 }
 
-function maybeEvent() {
-  const roll=Math.random();
-  if (roll<0.3) { game.events.push({type:'reverse', t:6}); banner('CONTROLS ARE REVERSED.','chaos'); }
-  else if (roll<0.55) { game.events.push({type:'wind', t:5, dir:Math.random()<.5?-1:1}); banner('WIND.','obviously'); }
+function maybeEvent(reveals) {
+  const r=Math.random();
+  const extra = reveals||0;
+  if (r<0.18+extra*0.05) { game.events.push({type:'reverse', t:6}); banner('CONTROLS ARE REVERSED.','chaos'); }
+  else if (r<0.40+extra*0.05) { game.events.push({type:'wind', t:5, dir:Math.random()<.5?-1:1}); banner('WIND.','obviously'); }
+  else if (r<0.58+extra*0.04) { game.events.push({type:'quake', t:4}); banner('EGGQUAKE.','structural damage'); }
+  else if (r<0.72+extra*0.03) { game.events.push({type:'flip', t:3}); banner('GRAVITY IS BROKEN.','thanks egg'); }
+  else if (r<0.84) { game.barrelRoll=1; banner('BARREL ROLL.','do a barrel roll'); }
+  else { game.rainbow=3; banner('RAINBOW MODE.','you caused this'); }
 }
 
 function killEgg() {
   if (game.state!==STATE.PLAY) return;
   game.state=STATE.DEAD;
-  // ground lives in world coords; re-stage the egg visibly above it
   const groundWY = game.camY + H*0.72;
   egg.y = game.camY + H*0.30;
   egg.vy = 560; egg.vr = 2.4*(Math.random()<.5?1:-1);
-  game.dead={t:0, pancake:false, card:false, groundY:groundWY};
+  const dm=DEATH_MSGS[Math.floor(Math.random()*DEATH_MSGS.length)];
+  game.dead={t:0, pancake:false, card:false, groundY:groundWY, msg:dm[0], sub:dm[1]};
   AU.whistleDown();
+  game.barrelRoll=1; game.flash=0.5; game.shake=20;
   if (window.L) window.L('KILL ey='+(egg.y|0)+' cam='+(game.camY|0));
   if (game.score>game.best) {
     game.best=game.score;
@@ -702,6 +789,10 @@ function update(dt) {
   if (game.shake>0) game.shake=Math.max(0,game.shake-dt*42);
   game.zoom+=(1-game.zoom)*Math.min(1,dt*7);
   if (game.banner) { game.banner.t+=dt; if(game.banner.t>game.banner.dur) game.banner=null; }
+  if (game.barrelRoll>0) game.barrelRoll-=dt*0.6;
+  if (game.rainbow>0) { game.rainbow-=dt; game.rainbowHue+=dt*200; }
+  if (game.comboT>0) { game.comboT-=dt; if(game.comboT<=0) game.combo=0; }
+  if (game.thoughtT>0) game.thoughtT-=dt;
 
   // ambient spawn
   if (Math.random()<0.12) ambient();
@@ -725,7 +816,6 @@ function update(dt) {
   if (game.state===STATE.REVEAL) { updateReveal(dt); return; }
 
   /* ---- PLAY ---- */
-  // events timers
   for (let i=game.events.length-1;i>=0;i--){
     game.events[i].t-=dt;
     if (game.events[i].t<=0) game.events.splice(i,1);
@@ -735,7 +825,10 @@ function update(dt) {
   let sdt=dt;
   if (game.hitStop>0) { game.hitStop-=dt; sdt*=0.12; }
 
-  const g=gravityG();
+  const quake=game.events.find(e=>e.type==='quake');
+  if (quake) game.shake=Math.max(game.shake, 9*Math.abs(Math.sin(game.time*22)));
+  const flip=game.events.find(e=>e.type==='flip');
+  const g=gravityG()*(flip?-1:1);
   egg.vy+=g*sdt;
   const wind=game.events.find(e=>e.type==='wind');
   if (wind) egg.vx+=wind.dir*260*sdt;
@@ -838,9 +931,9 @@ function updateReveal(dt) {
   game.camY+=(target-game.camY)*Math.min(1,dt*4);
 
   if (t>0.35&&rv.phase===0){ rv.phase=1; AU.hardMute(true); }
-  if (t>1.9&&!rv.ducked){ rv.ducked=true; AU.hardMute(false); AU.duckWah(); }
-  if (t>2.85&&!rv.yoinked){ rv.yoinked=true; AU.yoink(); }
-  if (t>3.25&&!rv.closed){ rv.closed=true; AU.plok(); game.flash=0.5; }
+  if (t>1.9&&!rv.ducked){ rv.ducked=true; AU.hardMute(false); AU.duckWah(); AU.absurdHonk(); }
+  if (t>2.85&&!rv.yoinked){ rv.yoinked=true; AU.yoink(); game.barrelRoll=0.7; }
+  if (t>3.25&&!rv.closed){ rv.closed=true; AU.plok(); game.flash=0.6; game.shake=14; }
   if (t>4.05) finishReveal();
 }
 
@@ -1192,6 +1285,21 @@ function drawRevealScene() {
     ctx.scale(0.4+0.6*up,0.4+0.6*up);
     drawChick(t);
     ctx.restore();
+
+    // speech line above chick
+    if (t>2.0&&t<3.2&&!close){
+      const lineA=Math.min(1,(t-2.0)/0.3)*Math.max(0,1-(t-3.0)/0.2);
+      ctx.save();
+      ctx.globalAlpha=lineA;
+      ctx.font='900 17px system-ui, Arial';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.4)';
+      const txt=('"'+rv.line+'"').toUpperCase();
+      ctx.strokeText(txt,0,-70);
+      ctx.fillStyle='#fff';
+      ctx.fillText(txt,0,-70);
+      ctx.restore();
+    }
   }
 
   // when closed draw full egg + fading cracks
@@ -1237,8 +1345,13 @@ function drawChick(t) {
   ctx.beginPath(); ctx.ellipse(0,12,14,15,0,0,7); ctx.fill();
   // head is the body top; wings
   ctx.fillStyle='#F2B900';
-  const wave = t>2.2&&t<2.85 ? Math.sin(t*16)*8 : 3;
-  ctx.beginPath(); ctx.ellipse(-22,8,7,13,0.4+wave*0.03,0,7); ctx.fill();
+  // left wing waves when emerged
+  const waving = t>2.0&&t<2.85;
+  const wave = waving ? Math.sin(t*16)*8 : 3;
+  const wingRotL = waving ? Math.sin(t*14)*0.6 : 0.4+wave*0.03;
+  ctx.save(); ctx.translate(-22,8); ctx.rotate(wingRotL);
+  ctx.beginPath(); ctx.ellipse(0,0,7,13,0,0,7); ctx.fill();
+  ctx.restore();
   ctx.beginPath(); ctx.ellipse(22,8,7,13,-0.4,0,7); ctx.fill();
   // beak
   ctx.fillStyle='#FF7A1A';
@@ -1474,24 +1587,65 @@ function drawDeathCard() {
   if (!game.dead.card) return;
   const a=Math.min(1,(game.dead.t-0.7)/0.4);
   ctx.save(); ctx.globalAlpha=a;
-  const pw=W*0.82, ph=H*0.26, px=(W-pw)/2, py=H*0.1;
-  ctx.fillStyle='rgba(20,14,40,.88)';
+  const pw=W*0.84, ph=H*0.28, px=(W-pw)/2, py=H*0.1;
+  ctx.fillStyle='rgba(20,14,40,.9)';
   roundRect(ctx,px,py,pw,ph,22); ctx.fill();
   ctx.textAlign='center';
   ctx.fillStyle='#FFD93D';
-  ctx.font='900 26px system-ui, Arial';
-  ctx.fillText('IT IS A PANCAKE NOW.',W/2,py+34);
-  ctx.fillStyle='#fff'; ctx.font='700 14px system-ui, Arial';
-  ctx.fillText('the egg is fine. YOU lost.',W/2,py+62);
+  ctx.font='900 24px system-ui, Arial';
+  ctx.fillText(game.dead.msg||'IT IS A PANCAKE NOW.',W/2,py+34);
+  ctx.fillStyle='#fff'; ctx.font='700 13px system-ui, Arial';
+  ctx.fillText(game.dead.sub||'the egg is fine. YOU lost.',W/2,py+60);
   ctx.font='900 18px system-ui, Arial';
-  ctx.fillText(game.score+'  BOUNCES   \u00B7   BEST  '+game.best,W/2,py+96);
+  ctx.fillText(game.score+'  BOUNCES   \u00B7   BEST  '+game.best,W/2,py+94);
+  if (game.revealCount>0){
+    ctx.fillStyle='#FF7AC4'; ctx.font='800 11px system-ui, Arial';
+    ctx.fillText(game.revealCount+' TIME'+(game.revealCount>1?'S':'')+' THE CHICK CAME OUT',W/2,py+116);
+  }
   if (game.score>=game.best&&game.score>0){
     ctx.fillStyle='#7BE0C4'; ctx.font='800 12px system-ui, Arial';
-    ctx.fillText('NEW BEST, LEGEND',W/2,py+120);
+    ctx.fillText('NEW BEST, LEGEND',W/2,py+130);
   }
   const p=0.5+0.5*Math.sin(game.time*5);
   ctx.globalAlpha=a*p; ctx.fillStyle='#fff'; ctx.font='900 16px system-ui, Arial';
   ctx.fillText('TAP TO RETRY',W/2,py+ph-30);
+  ctx.restore();
+}
+
+/* EGG THOUGHT BUBBLE */
+function drawThought() {
+  if (game.thoughtT<=0||!game.thought) return;
+  const a=Math.min(1,game.thoughtT/0.3);
+  ctx.save();
+  ctx.globalAlpha=a;
+  const bx=egg.x, by=egg.y-EGG_RY*egg.sy-30;
+  ctx.font='800 13px system-ui, Arial';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  const tw=ctx.measureText(game.thought).width+18;
+  // little tail
+  ctx.fillStyle='rgba(255,255,255,.92)';
+  ctx.beginPath(); ctx.moveTo(bx-4,by+8); ctx.lineTo(bx+4,by+8); ctx.lineTo(bx,by+16); ctx.fill();
+  roundRect(ctx,bx-tw/2,by-12,tw,22,8); ctx.fill();
+  ctx.fillStyle='#3A2A20';
+  ctx.fillText(game.thought,bx,by-1);
+  ctx.restore();
+}
+
+/* COMBO COUNTER */
+function drawCombo() {
+  if (game.combo<2||game.comboT<=0) return;
+  const a=Math.min(1,game.comboT);
+  ctx.save();
+  ctx.globalAlpha=a;
+  ctx.textAlign='right'; ctx.textBaseline='top';
+  ctx.font='900 28px system-ui, Arial';
+  ctx.fillStyle='#FF3DAC';
+  ctx.strokeStyle='rgba(0,0,0,.3)'; ctx.lineWidth=4;
+  ctx.strokeText('x'+game.combo,W-16,42);
+  ctx.fillText('x'+game.combo,W-16,42);
+  ctx.font='700 10px system-ui, Arial';
+  ctx.fillStyle='#fff';
+  ctx.fillText('COMBO',W-16,74);
   ctx.restore();
 }
 
@@ -1505,9 +1659,13 @@ function render() {
   const shx=(Math.random()-.5)*game.shake;
   const shy=(Math.random()-.5)*game.shake;
 
-  // world transform (zoom + camera + shake)
+  // barrel roll rotation
+  const br=game.barrelRoll>0?Math.sin(game.barrelRoll*Math.PI)*0.5:0;
+
+  // world transform (zoom + camera + shake + barrel roll)
   ctx.save();
   ctx.translate(W/2,H/2);
+  ctx.rotate(br);
   ctx.scale(game.zoom,game.zoom);
   ctx.translate(-W/2+shx,-H/2+shy);
   ctx.translate(0,-game.camY);
@@ -1522,7 +1680,19 @@ function render() {
   else if (game.state===STATE.DEAD) drawDeadVisuals();
   else drawEgg();
 
+  // thought bubble in world space
+  if (game.state===STATE.PLAY) drawThought();
+
   ctx.restore();
+
+  // rainbow overlay
+  if (game.rainbow>0){
+    ctx.save();
+    ctx.globalAlpha=Math.min(0.25,game.rainbow*0.12);
+    ctx.fillStyle='hsl('+((game.rainbowHue%360)+360)%360+',90%,60%)';
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+  }
 
   // screen-space ambient
   drawParticles(true);
@@ -1530,6 +1700,7 @@ function render() {
   if (game.state===STATE.TITLE) drawTitle();
   else {
     drawHUD();
+    drawCombo();
     tapZones.push({x:W-48,y:8,w:40,h:30,act:'mute'});
     drawBanner();
     if (game.state===STATE.DEAD) drawDeathCard();
