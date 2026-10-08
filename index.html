@@ -377,6 +377,32 @@ const AU = {
     this.tone('sine', 160, t, 0.18, 0.4, this.sfxBus);
   },
 
+  boing() {
+    if (!this.ac) return;
+    const t=this.ac.currentTime;
+    const o=this.ac.createOscillator(), g=this.ac.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(200,t);
+    o.frequency.exponentialRampToValueAtTime(500,t+0.08);
+    o.frequency.exponentialRampToValueAtTime(180,t+0.22);
+    g.gain.setValueAtTime(0.22,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.24);
+    o.connect(g); g.connect(this.sfxBus);
+    o.start(t); o.stop(t+0.26);
+  },
+
+  pow() {
+    if (!this.ac) return;
+    const t=this.ac.currentTime;
+    const src=this.ac.createBufferSource(); src.buffer=this.noiseBuf;
+    const f=this.ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1800;
+    const g=this.ac.createGain();
+    g.gain.setValueAtTime(0.28,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.1);
+    src.connect(f); f.connect(g); g.connect(this.sfxBus);
+    src.start(t); src.stop(t+0.12);
+    this.tone('square', 120, t, 0.1, 0.15, this.sfxBus);
+  },
+
   setMuted(m) {
     this.muted=m;
     if (this.ac) this.master.gain.linearRampToValueAtTime(m?0:0.9, this.ac.currentTime+0.05);
@@ -622,6 +648,20 @@ function doBounce(pad) {
   waves.push({x:pad.x,y:pad.y-10,r:8,max:hard?150:110,t:0});
   game.shake=hard?13:7;
   game.hitStop=hard?0.07:0.045;
+
+  // comic popup text on hard hits
+  if (hard) {
+    const pops=['BOING','POW','THUNK','WHAM','THWAP','KRUNCH'];
+    parts.push({x:pad.x,y:pad.y-30,vx:(Math.random()-0.5)*40,vy:-80-Math.random()*40,
+      life:0,max:0.6,sz:0,rot:0,vr:0,
+      c:'#fff',kind:'text',text:pops[Math.floor(Math.random()*pops.length)],ambient:false});
+    AU.boing();
+  } else if (perfect) {
+    parts.push({x:pad.x,y:pad.y-30,vx:(Math.random()-0.5)*40,vy:-100,
+      life:0,max:0.7,sz:0,rot:0,vr:0,
+      c:'#FFD93D',kind:'text',text:'PERFECT!',ambient:false});
+    AU.pow();
+  }
   game.flash=perfect?0.35:0.12;
 
   // face
@@ -974,7 +1014,9 @@ function drawBackground() {
   const th=THEMES[game.scene];
   const g=ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,th.bg); g.addColorStop(1,th.bgDark);
-  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // expand fill to cover corners when rotated (barrel roll)
+  const diag=Math.ceil(Math.sqrt(W*W+H*H));
+  ctx.fillStyle=g; ctx.fillRect(-diag/2,-diag/2,W+diag,H+diag);
 
   // scene decor (parallax on camera)
   const par=game.camY*0.25;
@@ -1040,6 +1082,12 @@ function drawParticleShape(p){
   } else if (p.kind==='neon') {
     ctx.shadowColor=p.c; ctx.shadowBlur=10;
     ctx.fillRect(-p.sz/2,-p.sz/2,p.sz,p.sz);
+  } else if (p.kind==='text') {
+    ctx.font='900 20px system-ui, Arial';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.5)';
+    ctx.strokeText(p.text,0,0);
+    ctx.fillText(p.text,0,0);
   } else {
     ctx.beginPath(); ctx.arc(0,0,p.sz,0,7); ctx.fill();
   }
@@ -1225,6 +1273,10 @@ function drawFace() {
   if (ex==='panic'){
     ctx.fillStyle='#9ED8FF';
     ctx.beginPath(); ctx.moveTo(24,-28); ctx.quadraticCurveTo(28,-20,24,-18); ctx.quadraticCurveTo(20,-20,24,-28); ctx.fill();
+    // extra sweat droplets flying
+    const sp=Math.sin(game.time*22)*0.5+0.5;
+    ctx.beginPath(); ctx.moveTo(-26,-32); ctx.quadraticCurveTo(-30,-24,-26,-22); ctx.quadraticCurveTo(-22,-24,-26,-32); ctx.fill();
+    if (sp>0.4){ ctx.beginPath(); ctx.arc(-28,-36,2.5,0,7); ctx.fill(); }
   }
   ctx.restore();
 }
@@ -1286,7 +1338,7 @@ function drawRevealScene() {
     drawChick(t);
     ctx.restore();
 
-    // speech line above chick
+    // speech line above chick — clamp to screen edges
     if (t>2.0&&t<3.2&&!close){
       const lineA=Math.min(1,(t-2.0)/0.3)*Math.max(0,1-(t-3.0)/0.2);
       ctx.save();
@@ -1295,9 +1347,11 @@ function drawRevealScene() {
       ctx.textAlign='center'; ctx.textBaseline='middle';
       ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.4)';
       const txt=('"'+rv.line+'"').toUpperCase();
-      ctx.strokeText(txt,0,-70);
+      const tw=ctx.measureText(txt).width;
+      const sx=Math.max(tw/2+8, Math.min(W-tw/2-8, egg.x));
+      ctx.strokeText(txt,sx-egg.x,-70);
       ctx.fillStyle='#fff';
-      ctx.fillText(txt,0,-70);
+      ctx.fillText(txt,sx-egg.x,-70);
       ctx.restore();
     }
   }
@@ -1371,6 +1425,20 @@ function drawChick(t) {
   ctx.fillRect(-15,-12,4,2.5); ctx.fillRect(7,-12,4,2.5);
   ctx.fillStyle='rgba(255,255,255,.3)';
   ctx.fillRect(-15,-9,8,1.4); ctx.fillRect(7,-9,8,1.4);
+  // animated glare sweep — a bright diagonal streak that slides across the lenses
+  const gl=(t*0.9)%3.2;                 // 0..3.2 loop, mostly dark
+  if (gl<1) {
+    const gx=-20+gl*44;                  // sweep x from -20 to +24
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-18,-14,36,10); ctx.clip(); // clip to both lenses
+    ctx.translate(gx,-9); ctx.rotate(-0.5);
+    ctx.fillStyle='rgba(255,255,255,'+(0.65*Math.sin(gl*Math.PI)).toFixed(3)+')';
+    ctx.fillRect(-2.5,-8,5,16);
+    ctx.fillStyle='rgba(255,255,255,'+(0.3*Math.sin(gl*Math.PI)).toFixed(3)+')';
+    ctx.fillRect(3.5,-8,2,16);
+    ctx.restore();
+  }
   // little feet
   ctx.strokeStyle='#FF7A1A'; ctx.lineWidth=3; ctx.lineCap='round';
   ctx.beginPath(); ctx.moveTo(-8,30); ctx.lineTo(-8,35); ctx.stroke();
@@ -1459,8 +1527,10 @@ function drawHUD() {
   roundRect(ctx,bx,by,bw,5,2.5); ctx.fill();
   const danger=egg.crack>60;
   ctx.fillStyle=danger?'#FF4D4D':th.padC;
-  if (danger) { const p=1+Math.sin(game.time*12)*0.25; roundRect(ctx,bx,by,bw*egg.crack/100*p,5,2.5); }
-  else roundRect(ctx,bx,by,bw*egg.crack/100,5,2.5);
+  // clamp the fill so the pulse never overflows
+  const cw=Math.min(bw, bw*egg.crack/100);
+  if (danger) { const p=1+Math.sin(game.time*12)*0.15; roundRect(ctx,bx,by,Math.min(bw,cw*p),5,2.5); }
+  else roundRect(ctx,bx,by,cw,5,2.5);
   ctx.fill();
 
   // mute icon
@@ -1488,14 +1558,18 @@ function drawBanner() {
   ctx.translate(W/2,H*0.3);
   ctx.scale(Math.min(1.15,pop),Math.min(1.15,pop));
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.font='900 34px system-ui, Arial';
-  ctx.lineWidth=6; ctx.strokeStyle='rgba(0,0,0,.25)';
+  // auto-scale to fit width
+  let fs=34;
+  ctx.font='900 '+fs+'px system-ui, Arial';
+  const tw=ctx.measureText(b.text).width;
+  if (tw>W*0.92) { fs=Math.floor(34*W*0.92/tw); ctx.font='900 '+fs+'px system-ui, Arial'; }
+  ctx.lineWidth=Math.max(3,fs*0.18); ctx.strokeStyle='rgba(0,0,0,.25)';
   ctx.strokeText(b.text,0,0);
   ctx.fillStyle='#fff';
   ctx.fillText(b.text,0,0);
   if (b.sub){
-    ctx.font='700 14px system-ui, Arial';
-    ctx.fillText(b.sub.toUpperCase(),0,30);
+    ctx.font='700 '+Math.max(10,Math.floor(fs*0.41))+'px system-ui, Arial';
+    ctx.fillText(b.sub.toUpperCase(),0,fs*0.88);
   }
   ctx.restore();
 }
@@ -1574,7 +1648,13 @@ function drawTitleStack(){
   ctx.textAlign='center'; ctx.textBaseline='middle';
   lines.forEach((ln,i)=>{
     const y=H*0.16+ i*52;
-    ctx.lineWidth=7; ctx.strokeStyle='rgba(0,0,0,.18)';
+    // auto-scale to fit width
+    ctx.font='900 44px system-ui, Arial';
+    const tw=ctx.measureText(ln).width;
+    let fs=44;
+    if (tw>W*0.92) fs=Math.floor(44*W*0.92/tw);
+    ctx.font='900 '+fs+'px system-ui, Arial';
+    ctx.lineWidth=Math.max(4,fs*0.16); ctx.strokeStyle='rgba(0,0,0,.18)';
     ctx.strokeText(ln,W/2,y);
     ctx.fillStyle= i? th.padC : th.ink;
     ctx.fillText(ln,W/2,y);
@@ -1587,7 +1667,7 @@ function drawDeathCard() {
   if (!game.dead.card) return;
   const a=Math.min(1,(game.dead.t-0.7)/0.4);
   ctx.save(); ctx.globalAlpha=a;
-  const pw=W*0.84, ph=H*0.28, px=(W-pw)/2, py=H*0.1;
+  const pw=W*0.84, ph=Math.min(H*0.32,280), px=(W-pw)/2, py=Math.max(8,H*0.1);
   ctx.fillStyle='rgba(20,14,40,.9)';
   roundRect(ctx,px,py,pw,ph,22); ctx.fill();
   ctx.textAlign='center';
@@ -1618,10 +1698,14 @@ function drawThought() {
   const a=Math.min(1,game.thoughtT/0.3);
   ctx.save();
   ctx.globalAlpha=a;
-  const bx=egg.x, by=egg.y-EGG_RY*egg.sy-30;
+  // clamp bubble to screen edges
   ctx.font='800 13px system-ui, Arial';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
   const tw=ctx.measureText(game.thought).width+18;
+  const halfW=tw/2+8;
+  let bx=egg.x, by=egg.y-EGG_RY*egg.sy-30;
+  bx=Math.max(halfW, Math.min(W-halfW, bx));
+  by=Math.max(36, by);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
   // little tail
   ctx.fillStyle='rgba(255,255,255,.92)';
   ctx.beginPath(); ctx.moveTo(bx-4,by+8); ctx.lineTo(bx+4,by+8); ctx.lineTo(bx,by+16); ctx.fill();
@@ -1662,10 +1746,21 @@ function render() {
   // barrel roll rotation
   const br=game.barrelRoll>0?Math.sin(game.barrelRoll*Math.PI)*0.5:0;
 
-  // world transform (zoom + camera + shake + barrel roll)
+  // chaos events: quake / flip add a small extra random screen tilt
+  let chaosTilt=0, chaosAmt=0;
+  if (game.state===STATE.PLAY){
+    if (game.events.includes('quake')) chaosAmt=Math.max(chaosAmt,1);
+    if (game.events.includes('flip'))  chaosAmt=Math.max(chaosAmt,1);
+    if (game.events.includes('wind'))  chaosAmt=Math.max(chaosAmt,0.4);
+  }
+  if (chaosAmt>0){
+    chaosTilt=(Math.random()-.5)*0.05*chaosAmt;
+  }
+
+  // world transform (zoom + camera + shake + barrel roll + chaos tilt)
   ctx.save();
   ctx.translate(W/2,H/2);
-  ctx.rotate(br);
+  ctx.rotate(br+chaosTilt);
   ctx.scale(game.zoom,game.zoom);
   ctx.translate(-W/2+shx,-H/2+shy);
   ctx.translate(0,-game.camY);
@@ -1691,6 +1786,34 @@ function render() {
     ctx.globalAlpha=Math.min(0.25,game.rainbow*0.12);
     ctx.fillStyle='hsl('+((game.rainbowHue%360)+360)%360+',90%,60%)';
     ctx.fillRect(0,0,W,H);
+    ctx.restore();
+  }
+
+  // chromatic aberration fringes during chaos events (cheap edge gradients)
+  if (chaosAmt>0 && game.state===STATE.PLAY){
+    const pulse=0.5+0.5*Math.sin(game.time*20);
+    const a=0.10*chaosAmt*(0.6+0.4*pulse);
+    const bw=Math.min(26, W*0.06);
+    ctx.save();
+    let g1=ctx.createLinearGradient(0,0,bw,0);
+    g1.addColorStop(0,'rgba(255,40,80,'+a.toFixed(3)+')');
+    g1.addColorStop(1,'rgba(255,40,80,0)');
+    ctx.fillStyle=g1; ctx.fillRect(0,0,bw,H);
+    let g2=ctx.createLinearGradient(W,0,W-bw,0);
+    g2.addColorStop(0,'rgba(40,220,255,'+a.toFixed(3)+')');
+    g2.addColorStop(1,'rgba(40,220,255,0)');
+    ctx.fillStyle=g2; ctx.fillRect(W-bw,0,bw,H);
+    // tiny vertical jitter fringe top/bottom when flip is on
+    if (game.events.includes('flip')){
+      let g3=ctx.createLinearGradient(0,0,0,bw);
+      g3.addColorStop(0,'rgba(180,80,255,'+a.toFixed(3)+')');
+      g3.addColorStop(1,'rgba(180,80,255,0)');
+      ctx.fillStyle=g3; ctx.fillRect(0,0,W,bw);
+      let g4=ctx.createLinearGradient(0,H,0,H-bw);
+      g4.addColorStop(0,'rgba(255,220,40,'+a.toFixed(3)+')');
+      g4.addColorStop(1,'rgba(255,220,40,0)');
+      ctx.fillStyle=g4; ctx.fillRect(0,H-bw,W,bw);
+    }
     ctx.restore();
   }
 
