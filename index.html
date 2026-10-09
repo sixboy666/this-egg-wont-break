@@ -326,10 +326,31 @@ const AU = {
     const o=this.ac.createOscillator(), g=this.ac.createGain();
     o.type='square'; o.frequency.setValueAtTime(520,t);
     o.frequency.exponentialRampToValueAtTime(340,t+0.05);
-    g.gain.setValueAtTime(0.12,t);
+    g.gain.setValueAtTime(0.1,t);
     g.gain.exponentialRampToValueAtTime(0.0001,t+0.07);
     o.connect(g); g.connect(this.sfxBus);
     o.start(t); o.stop(t+0.09);
+    // soft click body
+    const o2=this.ac.createOscillator(), g2=this.ac.createGain();
+    o2.type='triangle'; o2.frequency.setValueAtTime(760,t);
+    o2.frequency.exponentialRampToValueAtTime(620,t+0.04);
+    g2.gain.setValueAtTime(0.08,t);
+    g2.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+    o2.connect(g2); g2.connect(this.sfxBus);
+    o2.start(t); o2.stop(t+0.07);
+  },
+
+  /* soft low thunk for a wall clip */
+  bump() {
+    if (!this.ac) return;
+    const t=this.ac.currentTime;
+    const o=this.ac.createOscillator(), g=this.ac.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(190,t);
+    o.frequency.exponentialRampToValueAtTime(110,t+0.09);
+    g.gain.setValueAtTime(0.16,t);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+0.11);
+    o.connect(g); g.connect(this.sfxBus);
+    o.start(t); o.stop(t+0.13);
   },
 
   crackStep() {
@@ -539,7 +560,8 @@ const egg = {
   lookX:0, lookY:0, blink:0, nextBlink:2,
   crack:0, cracks:[],
   bounceN:0, tier:1,
-  alive:true, smug:0
+  alive:true, smug:0,
+  lean:0, trailT:0
 };
 
 function resetEgg() {
@@ -552,6 +574,7 @@ function resetEgg() {
   egg.crack=0; egg.cracks=[];
   egg.bounceN=0; egg.tier=1;
   egg.alive=true; egg.smug=0;
+  egg.lean=0; egg.trailT=0;
 }
 
 /* ---------------- PADS ---------------- */
@@ -701,6 +724,64 @@ const DEATH_MSGS = [
 const THOUGHTS = ['why','no','again?','you suck at this','i am egg','stop','help','lol','bruh','nice','gg','why me','suffer','bone?','i tire','oh no','not this','really?','embarrassing','egg'];
 const COMBO_LINES = ['STYLISH!','DISGUSTING!','EGGCELLENT!','UNHINGED!','GROSS!','STOP!','BANNED!','ILLEGAL!','OH NO!','YIKES!','EGG!','TOO FAR!'];
 
+/* nearest pad below the egg — the one it is currently travelling toward */
+function nextPad() {
+  let np=null;
+  for (const p of pads) {
+    if (p.y > egg.y + 24 && (!np || p.y < np.y)) np=p;
+  }
+  return np;
+}
+
+/* simulate current flight to the next pad's top (flip/wind/drag/walls/moving pads).
+   returns {pad,x,px,on} or null */
+function predictLanding() {
+  const pad = nextPad();
+  if (!pad) return null;
+  const flip = game.events.some(e=>e.type==='flip');
+  const windE = game.events.find(e=>e.type==='wind');
+  const g = gravityG()*(flip?-1:1);
+  const top = pad.y - 16;
+  let x=egg.x, y=egg.y, vx=egg.vx, vy=egg.vy, t=game.time;
+  const h=1/120;
+  for (let i=0;i<360;i++) {
+    vy += g*h;
+    if (windE) vx += windE.dir*260*h;
+    vx *= Math.pow(0.995,h*60);
+    x += vx*h; y += vy*h; t += h;
+    if (x<EGG_RX){ x=EGG_RX; vx=Math.abs(vx)*0.7; }
+    if (x>W-EGG_RX){ x=W-EGG_RX; vx=-Math.abs(vx)*0.7; }
+    if (vy>0 && y>=top) {
+      const px = pad.move ? pad.homeX + Math.sin(t*1.4+pad.seed)*pad.move : pad.x;
+      return { pad, x:Math.max(10,Math.min(W-10,x)), px, on:Math.abs(x-px)<pad.hw };
+    }
+  }
+  return null;
+}
+
+/* small air burst pushed opposite to a steering flip */
+function steerPuff(dir) {
+  for (let i=0;i<3;i++) {
+    parts.push({x:egg.x-dir*EGG_RX*0.75, y:egg.y+(Math.random()-0.5)*24,
+      vx:-dir*(50+Math.random()*70), vy:(Math.random()-0.5)*55,
+      life:0,max:0.32,sz:2+Math.random()*2.5,rot:0,vr:0,
+      c:'#FFFFFF',kind:'dot',ambient:false});
+  }
+}
+
+/* dust puff when the egg clips a side wall */
+function wallBump(side) {
+  for (let i=0;i<7;i++) {
+    parts.push({x:egg.x+side*EGG_RX, y:egg.y+(Math.random()-0.5)*EGG_RX*1.2,
+      vx:side*(60+Math.random()*120), vy:(Math.random()-0.5)*160,
+      life:0,max:0.35,sz:2+Math.random()*2.5,rot:0,vr:0,
+      c:'#FFFFFF',kind:'dot',ambient:false});
+  }
+  game.shake=Math.max(game.shake,2.6);
+  AU.bump();
+  if (navigator.vibrate) navigator.vibrate(10);
+}
+
 function doBounce(pad) {
   if (window.L) window.L('BOUNCE on padY='+(pad.y|0)+' padX='+(pad.x|0)+' eggX='+(egg.x|0));
   const prevTier=egg.tier;
@@ -764,6 +845,7 @@ function doBounce(pad) {
     AU.pow();
   }
   game.flash=perfect?0.35:0.12;
+  if ((perfect||hard)&&navigator.vibrate) navigator.vibrate(perfect?9:14);
 
   // face
   if (egg.tier>=5) {
@@ -915,7 +997,12 @@ function tapAction() {
   const reverse = game.events.some(e=>e.type==='reverse');
   const cur=egg.vx;
   let desired = cur<=0 ? 1 : -1;   // flip current drift
-  if (Math.abs(cur)<20) desired=Math.random()<.5?1:-1;
+  if (Math.abs(cur)<20) {
+    // first / near-still tap: aim at the next pad instead of a coin flip
+    const np=nextPad();
+    const npX=np ? (np.move&&np.homeX?np.homeX:np.x) : W/2;
+    desired = npX>=egg.x ? 1 : -1;
+  }
 
   // tier 6: the egg actively dodges the player
   if (egg.tier>=6 && Math.random()<0.32) {
@@ -929,6 +1016,9 @@ function tapAction() {
   if (reverse) desired=-desired;
   egg.vx=desired*(250+game.speedK*30);
   egg.lookX=desired;
+  egg.lean += desired*0.2;          // banking kick, settles back to drift tilt
+  steerPuff(desired);
+  if (navigator.vibrate) navigator.vibrate(8);
   if (window.L) window.L('tap -> vx='+egg.vx.toFixed(0)+' tier='+egg.tier);
 }
 
@@ -1024,12 +1114,25 @@ function update(dt) {
   egg.y+=egg.vy*sdt;
 
   // walls
-  if (egg.x<EGG_RX){ egg.x=EGG_RX; egg.vx=Math.abs(egg.vx)*0.7; }
-  if (egg.x>W-EGG_RX){ egg.x=W-EGG_RX; egg.vx=-Math.abs(egg.vx)*0.7; }
+  if (egg.x<EGG_RX){ egg.x=EGG_RX; if (egg.vx<0) wallBump(-1); egg.vx=Math.abs(egg.vx)*0.7; }
+  if (egg.x>W-EGG_RX){ egg.x=W-EGG_RX; if (egg.vx>0) wallBump(1); egg.vx=-Math.abs(egg.vx)*0.7; }
 
   // rotation
   egg.rot+=egg.vr*sdt;
   if (egg.tier===1) egg.rot*=Math.pow(0.9,sdt*10);
+
+  // banking: gentle tilt with drift, plus kick on steering taps
+  const leanTarget=Math.max(-1,Math.min(1,egg.vx/260))*0.1;
+  egg.lean+=(leanTarget-egg.lean)*Math.min(1,sdt*8);
+  // motion trail during fast sideways dashes
+  egg.trailT-=sdt;
+  if (Math.abs(egg.vx)>230 && egg.trailT<=0) {
+    egg.trailT=0.05;
+    const d=egg.vx>0?1:-1;
+    parts.push({x:egg.x-d*EGG_RX*0.8,y:egg.y+(Math.random()-0.5)*EGG_RX,
+      vx:-d*40,vy:(Math.random()-0.5)*30,life:0,max:0.3,
+      sz:2+Math.random()*2,rot:0,vr:0,c:'rgba(255,255,255,.85)',kind:'dot',ambient:false});
+  }
 
   // squash spring
   const k=150, c=13;
@@ -1265,6 +1368,35 @@ function drawStar(x,y,out,inn,points){
 }
 
 /* pads */
+/* world-space landing hint on the next pad */
+function drawAimGuide() {
+  const L = predictLanding();
+  if (!L) return;
+  const pulse = 0.62+0.38*Math.sin(game.time*7);
+  const y = L.pad.y-22;
+  ctx.save();
+  if (L.on) {
+    ctx.globalAlpha=0.9*pulse;
+    ctx.strokeStyle='#FFD93D'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.arc(L.x,y,7,0,7); ctx.stroke();
+    ctx.fillStyle='#FFE88A';
+    ctx.beginPath(); ctx.arc(L.x,y,2.6,0,7); ctx.fill();
+    ctx.globalAlpha=0.45*pulse; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(L.x-5,y-12); ctx.lineTo(L.x,y-8); ctx.lineTo(L.x+5,y-12);
+    ctx.stroke();
+  } else {
+    ctx.globalAlpha=0.5*pulse;
+    ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(L.x,y,6,0,7); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(L.x-4,y-4); ctx.lineTo(L.x+4,y+4);
+    ctx.moveTo(L.x+4,y-4); ctx.lineTo(L.x-4,y+4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawPad(pad) {
   const th=THEMES[game.scene];
   const pr=pad.press;
@@ -1667,7 +1799,7 @@ function drawChick(t) {
 function drawEgg() {
   ctx.save();
   ctx.translate(egg.x,egg.y);
-  ctx.rotate(egg.rot);
+  ctx.rotate(egg.rot+egg.lean);
   ctx.scale(egg.sx,egg.sy);
   drawEggShellOnly();
   drawCracks();
@@ -2118,6 +2250,7 @@ function render() {
   const visiblePads = game.state===STATE.TITLE ? pads.slice(0,1) : pads;
   for (const pad of visiblePads) drawPad(pad);
   drawParticles(false);
+  if (game.state===STATE.PLAY) drawAimGuide();
 
   if (game.state===STATE.REVEAL) drawRevealScene();
   else if (game.state===STATE.DEAD) drawDeadVisuals();
