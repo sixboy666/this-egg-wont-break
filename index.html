@@ -89,6 +89,79 @@ const THEMES = [
     pType:'neon' }
 ];
 
+/* ---------------- EGG SKINS (META UNLOCKS) ---------------- */
+const SKINS = [
+  { id:0, name:'CLASSIC EGG', title:'EGG OWNER',
+    egg:null, shade:null, kind:'', n:0 },
+  { id:1, name:'GOLDEN EGG', title:'EGG ENTHUSIAST',
+    egg:'#FFE88A', shade:'#D99A1E', kind:'total', n:25 },
+  { id:2, name:'DEVIL EGG', title:'EGG DELINQUENT',
+    egg:'#FF8A7A', shade:'#B23A30', kind:'best', n:10 },
+  { id:3, name:'ROBOT EGG', title:'EGG ENGINEER',
+    egg:'#E4ECF6', shade:'#8A97A8', kind:'reveal', n:3 },
+  { id:4, name:'GALAXY EGG', title:'EGG COSMONAUT', dark:true,
+    egg:'#3A2E78', shade:'#120D30', kind:'best', n:20 }
+];
+
+/* ---------------- META / PERSISTENCE ---------------- */
+const META = {
+  total: parseInt(localStorage.getItem('tewb_total')||'0',10) || 0,
+  reveals: parseInt(localStorage.getItem('tewb_reveals')||'0',10) || 0,
+  seen: parseInt(localStorage.getItem('tewb_seen')||'0',10) || 0,
+  skin: parseInt(localStorage.getItem('tewb_skin')||'0',10) || 0,
+
+  unlockedMask() {
+    let m = 1;
+    if (this.total  >= 25) m |= 2;
+    if (game.best   >= 10) m |= 4;
+    if (this.reveals>= 3) m |= 8;
+    if (game.best   >= 20) m |= 16;
+    return m;
+  },
+  isUnlocked(id) { return !!(this.unlockedMask() & (1<<id)); },
+
+  /* distance remaining to a locked skin; returns {rem, kind} */
+  remainingTo(s) {
+    if (s.kind==='total')  return { rem:Math.max(0,s.n-this.total),  label:'BOUNCES' };
+    if (s.kind==='reveal') return { rem:Math.max(0,s.n-this.reveals),label:'REVEALS' };
+    return { rem:Math.max(0,s.n-game.best), label:'BEST RUN' };
+  },
+  nextLocked() {
+    for (const s of SKINS) if (!this.isUnlocked(s.id)) return s;
+    return null;
+  },
+  select(id) {
+    if (!this.isUnlocked(id)) return;
+    this.skin=id;
+    localStorage.setItem('tewb_skin', String(id));
+  },
+  cycleSkin() {
+    const ids = SKINS.map(s=>s.id).filter(id=>this.isUnlocked(id));
+    const i = ids.indexOf(this.skin);
+    this.select(ids[(i+1)%ids.length]);
+  }
+};
+
+/* Evaluate freshly-qualified skins, queue celebrations. Returns #new. */
+function checkUnlocks() {
+  const fresh = META.unlockedMask() & ~META.seen;
+  if (!fresh) return 0;
+  for (let id=1; id<SKINS.length; id++) {
+    if (fresh & (1<<id)) {
+      META.seen |= (1<<id);
+      game.unlockQueue.push(id);
+    }
+  }
+  localStorage.setItem('tewb_seen', String(META.seen));
+  return fresh;
+}
+
+/* shell colors for the currently equipped skin (falls back to theme) */
+function shellColors() {
+  const th = THEMES[game.scene], s = SKINS[META.skin] || SKINS[0];
+  return { egg: s.egg || th.egg, shade: s.shade || th.eggShade, dark: !!s.dark, id: s.id };
+}
+
 /* PENTATONIC SEMITONE OFFSETS — every note is always catchy. */
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16];
 const BOUNCE_SEQ = [0, 2, 4, 5, 7, 5, 4, 2]; // index into PENTA
@@ -403,6 +476,30 @@ const AU = {
     this.tone('square', 120, t, 0.1, 0.15, this.sfxBus);
   },
 
+  /* ---- milestone / unlock fanfare ---- */
+  milestone(level) {
+    if (!this.ac) return;
+    const th=this.theme();
+    const t=this.ac.currentTime;
+    [0,4,7,12].forEach((s,i)=>{
+      this.tone('triangle', th.root*Math.pow(2,(s+12+level*2)/12),
+        t+i*0.07, 0.16, 0.3, this.sfxBus);
+    });
+    this.pluck('sine', th.root*Math.pow(2,(16+level*2)/12), t+0.24, 0.2, 0.2);
+  },
+
+  unlockFanfare() {
+    if (!this.ac) return;
+    const th=this.theme();
+    const t=this.ac.currentTime;
+    [0,4,7,12,16].forEach((s,i)=>{
+      this.tone(i%2?'square':'triangle',
+        th.root*Math.pow(2,(s+12)/12), t+i*0.09, 0.3,
+        i===4?0.3:0.2, this.sfxBus);
+    });
+    this.pluck('sine', th.root*4, t+0.5, 0.25, 0.18);
+  },
+
   setMuted(m) {
     this.muted=m;
     if (this.ac) this.master.gain.linearRampToValueAtTime(m?0:0.9, this.ac.currentTime+0.05);
@@ -428,7 +525,8 @@ const game = {
   speedK:1, events:[],
   barrelRoll:0, rainbow:0, rainbowHue:0,
   thought:null, thoughtT:0,
-  revealCount:0
+  revealCount:0, goal:10,
+  unlockQueue:[], unlockShow:null
 };
 
 /* ---------------- EGG ---------------- */
@@ -566,6 +664,7 @@ function startRun() {
   game.camY=0; game.shake=0; game.zoom=1; game.flash=0;
   game.events=[]; game.barrelRoll=0; game.rainbow=0;
   game.thought=null; game.thoughtT=0; game.revealCount=0;
+  game.goal=10; game.unlockShow=null;
   resetEgg();
   initPads();
   AU.tension=0; AU.seqIdx=0;
@@ -607,6 +706,8 @@ function doBounce(pad) {
   const prevTier=egg.tier;
   egg.bounceN++;
   game.score++;
+  META.total++;
+  localStorage.setItem('tewb_total', String(META.total));
   egg.tier=tierFor(egg.bounceN);
   pad.used=true; pad.press=1;
 
@@ -690,17 +791,60 @@ function doBounce(pad) {
   // rainbow chaos on high combo
   if (game.combo>=5) { game.rainbow=1.5; }
 
-  if (egg.tier!==prevTier && TIER_BANNERS[egg.tier]) {
+  // MILESTONE GOAL (reward can save a near-100 shell)
+  const goalHit = egg.bounceN>=game.goal;
+  if (goalHit) hitMilestone();
+
+  if (egg.tier!==prevTier && TIER_BANNERS[egg.tier] && !goalHit) {
     banner(TIER_BANNERS[egg.tier][0], TIER_BANNERS[egg.tier][1]);
   }
+
+  // META UNLOCK — claim card after the run (don't bury a milestone banner)
+  if (checkUnlocks() && !goalHit) banner('NEW EGG FOUND!', 'collect it after this run');
 
   // REVEAL TRIGGER
   if (egg.crack>=100) enterReveal();
 }
 
+/* goal reached: bonus + bounded shell relief + gold celebration */
+function hitMilestone() {
+  const g = game.goal;
+  const level = Math.max(0, Math.round(g/5) - 2);   // 10->0, 15->1 ...
+  AU.milestone(level);
+  game.score += 3;
+  egg.crack = Math.max(0, egg.crack - 18);
+  game.flash = 0.45; game.zoom = 1.09;
+  game.shake = Math.max(game.shake, 6);
+  goldBurst(egg.x, egg.y);
+  parts.push({x:egg.x,y:egg.y-EGG_RY-14,vx:0,vy:-70,
+    life:0,max:0.8,sz:0,rot:0,vr:0,
+    c:'#FFE88A',kind:'text',text:'WAXED!',ambient:false});
+  parts.push({x:egg.x+34,y:egg.y-EGG_RY+4,vx:0,vy:-60,
+    life:0,max:0.7,sz:0,rot:0,vr:0,
+    c:'#FFF6C9',kind:'text',text:'+3',ambient:false});
+  banner('GOAL '+g+' · WAXED!', '+3 BONUS · SHELL REINFORCED');
+  game.goal += 5;
+}
+
+/* gold star/confetti burst in world space */
+function goldBurst(x,y) {
+  const cols=['#FFE88A','#FFD93D','#FFF6C9','#F7B733','#FFFFFF'];
+  for (let i=0;i<22;i++) {
+    const a=-Math.PI/2+(Math.random()-0.5)*2.3;
+    const sp=120+Math.random()*210;
+    parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-30,
+      life:0,max:0.65+Math.random()*0.5,sz:3+Math.random()*4,
+      rot:Math.random()*6.28,vr:(Math.random()-.5)*9,
+      c:cols[i%cols.length],kind:i%3===0?'star':'dot',ambient:false});
+  }
+}
+
 function enterReveal() {
   game.state=STATE.REVEAL;
   game.revealCount++;
+  META.reveals++;
+  localStorage.setItem('tewb_reveals', String(META.reveals));
+  checkUnlocks();   // card waits until the run ends
   game.rv={t:0, phase:0, ducked:false, yoinked:false, closed:false, line:REVEAL_LINES[Math.floor(Math.random()*REVEAL_LINES.length)]};
   egg.vy=-60; egg.vx=0; egg.vr=0;
   if (egg.tier>=5){ egg.face='shock'; egg.faceT=9; }
@@ -751,6 +895,7 @@ function killEgg() {
     game.best=game.score;
     localStorage.setItem('tewb_best', String(game.best));
   }
+  checkUnlocks();
 }
 
 /* ---------------- INPUT ---------------- */
@@ -760,6 +905,7 @@ function tapAction() {
   AU.init();
   if (game.state===STATE.TITLE) { startRun(); return; }
   if (game.state===STATE.DEAD) {
+    if (game.unlockShow) { game.unlockShow=null; return; }
     if (game.dead.t>0.7) startRun();
     return;
   }
@@ -794,6 +940,7 @@ function pointerDown(px,py) {
       if (z.act==='prev') switchScene(-1);
       else if (z.act==='next') switchScene(1);
       else if (z.act==='mute') toggleMute();
+      else if (z.act==='egg') META.cycleSkin();
       return;
     }
   }
@@ -989,6 +1136,20 @@ function updateDead(dt) {
       burst(egg.x,d.groundY,true);
     }
   } else if (!d.card&&d.t>0.7) { d.card=true; }
+
+  // auto-open queued unlock celebrations over the death card
+  if (d.pancake && !game.unlockShow && game.unlockQueue.length) {
+    game.unlockShow={id:game.unlockQueue.shift(), t:0, launched:false};
+  }
+  if (game.unlockShow) {
+    const u=game.unlockShow;
+    u.t+=dt;
+    if (!u.launched) {
+      u.launched=true;
+      AU.unlockFanfare();
+      goldBurst(W/2, d.groundY-160);
+    }
+  }
   // spring wobble of pancake
   if (d.pancake) {
     egg.svx+=( (1.9-egg.sx)*90 - egg.svx*10)*dt;
@@ -1174,7 +1335,7 @@ function eggPath() {
 }
 
 function drawCracks() {
-  const th=THEMES[game.scene];
+  const sc=shellColors();
   ctx.save();
   eggPath(); ctx.clip();
   ctx.lineCap='round'; ctx.lineJoin='round';
@@ -1189,7 +1350,7 @@ function drawCracks() {
       ctx.lineTo(a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f);
     }
     ctx.globalAlpha=c.fade?0.3:0.8;
-    ctx.strokeStyle='rgba(86,58,40,.9)'; ctx.lineWidth=c.w; ctx.stroke();
+    ctx.strokeStyle=sc.dark?'rgba(255,238,180,.95)':'rgba(86,58,40,.9)'; ctx.lineWidth=c.w; ctx.stroke();
     ctx.globalAlpha=c.fade?0.3:0.5;
     ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=0.8;
     ctx.stroke();
@@ -1202,12 +1363,16 @@ function drawFace() {
   if (egg.tier<5) return;
   const ex=egg.face;
   const blinking=egg.blink>0;
+  const sc=shellColors();
+  const ink = sc.dark ? '#EFE4FF' : '#3A2A20';      // eyes/brows
+  const lip = sc.dark ? '#E9C9B8' : '#8A4A30';      // mouth line
+  const cavity = sc.dark ? '#FFB86B' : '#6E3524';   // open-mouth fill
   ctx.save();
   // eyes
   const eyes=[-15,15];
   for (const ex0 of eyes) {
     if (ex==='dead' || (game.state===STATE.DEAD)) {
-      ctx.strokeStyle='#3A2A20'; ctx.lineWidth=3; ctx.lineCap='round';
+      ctx.strokeStyle=ink; ctx.lineWidth=3; ctx.lineCap='round';
       ctx.beginPath();
       ctx.moveTo(ex0-6,-20); ctx.lineTo(ex0+6,-8);
       ctx.moveTo(ex0+6,-20); ctx.lineTo(ex0-6,-8); ctx.stroke();
@@ -1215,10 +1380,10 @@ function drawFace() {
     }
     if (blinking || ex==='happy' && egg.tier>=5) {
       if (ex==='happy'){
-        ctx.strokeStyle='#3A2A20'; ctx.lineWidth=3; ctx.lineCap='round';
+        ctx.strokeStyle=ink; ctx.lineWidth=3; ctx.lineCap='round';
         ctx.beginPath(); ctx.arc(ex0,-13,6,Math.PI*0.15,Math.PI*0.85,true); ctx.stroke();
       } else {
-        ctx.strokeStyle='#3A2A20'; ctx.lineWidth=2.5;
+        ctx.strokeStyle=ink; ctx.lineWidth=2.5;
         ctx.beginPath(); ctx.moveTo(ex0-6,-14); ctx.lineTo(ex0+6,-14); ctx.stroke();
       }
       continue;
@@ -1238,7 +1403,7 @@ function drawFace() {
     ctx.beginPath(); ctx.arc(px-1,py-1.2,1.1,0,7); ctx.fill();
   }
   // brows
-  ctx.strokeStyle='#3A2A20'; ctx.lineWidth=2.5; ctx.lineCap='round';
+  ctx.strokeStyle=ink; ctx.lineWidth=2.5; ctx.lineCap='round';
   if (ex==='focus'||ex==='shock'){
     ctx.beginPath(); ctx.moveTo(-22,-26); ctx.lineTo(-9,-24); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(22,-26); ctx.lineTo(9,-24); ctx.stroke();
@@ -1247,10 +1412,10 @@ function drawFace() {
     ctx.beginPath(); ctx.moveTo(-22,-25); ctx.lineTo(-9,-27); ctx.stroke();
   }
   // mouth
-  ctx.strokeStyle='#8A4A30'; ctx.fillStyle='#8A4A30'; ctx.lineWidth=2.4;
+  ctx.strokeStyle=lip; ctx.fillStyle=lip; ctx.lineWidth=2.4;
   ctx.beginPath();
   if (ex==='wow'||ex==='shock'){
-    ctx.fillStyle='#6E3524';
+    ctx.fillStyle=cavity;
     ctx.beginPath(); ctx.ellipse(0,5, ex==='shock'?3:5, ex==='shock'?4:7,0,0,7); ctx.fill();
   } else if (ex==='panic'){
     ctx.moveTo(-7,5);
@@ -1282,16 +1447,69 @@ function drawFace() {
 }
 
 function drawEggShellOnly() {
-  const th=THEMES[game.scene];
+  const sc=shellColors();
   const g=ctx.createLinearGradient(-EGG_RX,-EGG_RY,EGG_RX,EGG_RY);
-  g.addColorStop(0,th.egg); g.addColorStop(1,th.eggShade);
+  g.addColorStop(0,sc.egg); g.addColorStop(1,sc.shade);
   ctx.fillStyle=g; eggPath(); ctx.fill();
   // glossy top-left
   ctx.save(); eggPath(); ctx.clip();
-  ctx.globalAlpha=0.5; ctx.fillStyle='#fff';
+  ctx.globalAlpha=sc.id===1?0.65:0.5; ctx.fillStyle='#fff';
   ctx.beginPath(); ctx.ellipse(-16,-24,12,18,-0.4,0,7); ctx.fill();
   ctx.globalAlpha=1;
+  drawSkinAccent(sc, true);
   ctx.restore();
+  drawSkinAccent(sc, false);
+}
+
+/* per-skin flourishes. inside=true draws within the shell clip,
+   inside=false draws parts that intentionally extend beyond it. */
+function drawSkinAccent(sc, inside) {
+  const tw=0.65+0.35*Math.sin(game.time*5);
+  if (sc.id===1) {                 /* GOLDEN: sparkle stars */
+    if (inside) {
+      ctx.globalAlpha=tw; ctx.fillStyle='#FFFDE0';
+      [[-20,-28,4.5],[18,8,3.5],[4,30,3],[24,-32,2.6]].forEach(s=>drawStar(s[0],s[1],s[2],s[2]*0.42,4));
+      ctx.globalAlpha=1;
+    }
+  } else if (sc.id===2) {          /* DEVIL: horns + tail */
+    if (!inside) {
+      ctx.fillStyle=sc.shade;
+      ctx.beginPath();
+      ctx.moveTo(-24,-EGG_RY+8); ctx.lineTo(-30,-EGG_RY-12); ctx.lineTo(-14,-EGG_RY+2);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(24,-EGG_RY+8); ctx.lineTo(30,-EGG_RY-12); ctx.lineTo(14,-EGG_RY+2);
+      ctx.closePath(); ctx.fill();
+      // tail
+      ctx.strokeStyle=sc.shade; ctx.lineWidth=4; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(EGG_RX-6,EGG_RY-18);
+      ctx.quadraticCurveTo(EGG_RX+20,EGG_RY-4,EGG_RX+14,EGG_RY-26); ctx.stroke();
+      ctx.fillStyle=sc.shade;
+      ctx.beginPath(); ctx.moveTo(EGG_RX+14,EGG_RY-26);
+      ctx.lineTo(EGG_RX+22,EGG_RY-22); ctx.lineTo(EGG_RX+12,EGG_RY-18);
+      ctx.closePath(); ctx.fill();
+    }
+  } else if (sc.id===3) {          /* ROBOT: antenna / seam / rivets */
+    if (inside) {
+      ctx.strokeStyle='rgba(70,85,105,.6)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(-30,-6); ctx.lineTo(30,-6); ctx.stroke();
+      ctx.fillStyle=sc.shade;
+      ctx.beginPath(); ctx.arc(-26,10,2.4,0,7); ctx.arc(26,10,2.4,0,7); ctx.fill();
+    } else {
+      ctx.strokeStyle=sc.shade; ctx.lineWidth=2.6; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(0,-EGG_RY); ctx.lineTo(0,-EGG_RY-13); ctx.stroke();
+      ctx.fillStyle='#FF8A5C';
+      ctx.beginPath(); ctx.arc(0,-EGG_RY-15,3.4,0,7); ctx.fill();
+    }
+  } else if (sc.id===4) {          /* GALAXY: inner stars */
+    if (inside) {
+      ctx.fillStyle='#FFFDE8';
+      [[-22,-30,1.7,0],[16,-18,1.3,2],[24,12,1.6,4],[-14,16,1.2,1],[6,-2,1.5,3],[-26,26,1.3,5]]
+        .forEach(s=>{ ctx.globalAlpha=0.5+0.5*Math.sin(game.time*4+s[3]);
+          ctx.beginPath(); ctx.arc(s[0],s[1],s[2],0,7); ctx.fill(); });
+      ctx.globalAlpha=1;
+    }
+  }
 }
 
 /* chick reveal */
@@ -1366,7 +1584,7 @@ function drawRevealScene() {
 }
 
 function drawShellHalf(upper, open) {
-  const th=THEMES[game.scene];
+  const sc=shellColors();
   ctx.save();
   if (!upper) ctx.scale(1,-1);   // path is the top dome; flip it for the lower half
   // half occupies -ry..0 along y (upper before flip)
@@ -1384,9 +1602,9 @@ function drawShellHalf(upper, open) {
   ctx.bezierCurveTo(-EGG_RX*0.95,-EGG_RY*0.85,-EGG_RX*1.05,-EGG_RY*0.35,-EGG_RX,0);
   ctx.closePath();
   const g=ctx.createLinearGradient(-EGG_RX,-EGG_RY,EGG_RX,0);
-  g.addColorStop(0,th.egg); g.addColorStop(1,th.eggShade);
+  g.addColorStop(0,sc.egg); g.addColorStop(1,sc.shade);
   ctx.fillStyle=g; ctx.fill();
-  ctx.strokeStyle='rgba(120,90,60,.5)'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.strokeStyle=sc.dark?'rgba(220,210,255,.45)':'rgba(120,90,60,.5)'; ctx.lineWidth=1.5; ctx.stroke();
   ctx.restore();
 }
 
@@ -1519,7 +1737,7 @@ function drawHUD() {
   ctx.fillStyle=dark?'rgba(255,255,255,.92)':'rgba(60,40,20,.85)';
   ctx.font='800 15px system-ui, Arial';
   ctx.textAlign='left'; ctx.textBaseline='top';
-  ctx.fillText('BOUNCES ' + game.score, 16, 14);
+  ctx.fillText('BOUNCES ' + egg.bounceN, 16, 14);
 
   // crack bar
   const bw=W*0.42, bx=(W-bw)/2, by=20;
@@ -1532,6 +1750,18 @@ function drawHUD() {
   if (danger) { const p=1+Math.sin(game.time*12)*0.15; roundRect(ctx,bx,by,Math.min(bw,cw*p),5,2.5); }
   else roundRect(ctx,bx,by,cw,5,2.5);
   ctx.fill();
+
+  // milestone goal chip
+  const rem=Math.max(0, game.goal-egg.bounceN);
+  const goalLabel=(rem===1?'1 MORE':rem+' MORE')+' · GOAL '+game.goal;
+  ctx.font='800 11px system-ui, Arial';
+  const gw=ctx.measureText(goalLabel).width+18;
+  ctx.fillStyle='rgba(255,217,61,.95)';
+  roundRect(ctx,(W-gw)/2,31,gw,17,8.5); ctx.fill();
+  ctx.fillStyle='#5A4410';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(goalLabel,W/2,39.5);
+  ctx.textAlign='left'; ctx.textBaseline='top';
 
   // mute icon
   drawMuteIcon(W-40,14);
@@ -1562,7 +1792,7 @@ function drawBanner() {
   let fs=34;
   ctx.font='900 '+fs+'px system-ui, Arial';
   const tw=ctx.measureText(b.text).width;
-  if (tw>W*0.92) { fs=Math.floor(34*W*0.92/tw); ctx.font='900 '+fs+'px system-ui, Arial'; }
+  if (tw>W*0.86) { fs=Math.floor(34*W*0.86/tw); ctx.font='900 '+fs+'px system-ui, Arial'; }
   ctx.lineWidth=Math.max(3,fs*0.18); ctx.strokeStyle='rgba(0,0,0,.25)';
   ctx.strokeText(b.text,0,0);
   ctx.fillStyle='#fff';
@@ -1583,7 +1813,8 @@ function drawTitle() {
   ctx.scale(egg.sx,egg.sy);
   drawEggShellOnly();
   // tiny sunglasses peeking behind bottom corner
-  ctx.fillStyle='#15131F';
+  const tsc=shellColors();
+  ctx.fillStyle=tsc.dark?'#EFE4FF':'#15131F';
   roundRect(ctx,-24,40,16,7,2); ctx.fill();
   roundRect(ctx,-4,40,16,7,2); ctx.fill();
   ctx.fillRect(-8,42,5,2);
@@ -1598,6 +1829,59 @@ function drawTitle() {
 
   ctx.font='900 44px system-ui, Arial';
   drawTitleStack();
+
+  // equipped skin name + title
+  const sSkin=SKINS[META.skin];
+  ctx.fillStyle=th.ink;
+  ctx.font='900 16px system-ui, Arial';
+  ctx.fillText(sSkin.name,W/2,H*0.52);
+  ctx.globalAlpha=0.7;
+  ctx.font='800 9px system-ui, Arial';
+  ctx.fillText('· '+sSkin.title+' ·',W/2,H*0.548);
+  ctx.globalAlpha=1;
+
+  // picker hint
+  ctx.globalAlpha=0.55;
+  ctx.font='800 9px system-ui, Arial';
+  ctx.fillText('TAP THE EGG TO SWITCH',W/2,H*0.576);
+  ctx.globalAlpha=1;
+
+  // eggdex slots
+  const slotY=H*0.622, slotR=11, gap=30;
+  SKINS.forEach((s,i)=>{
+    const cx=W/2+(i-2)*gap;
+    if (META.isUnlocked(i)) {
+      ctx.fillStyle=i===META.skin?th.padC:th.ink;
+      ctx.beginPath(); ctx.arc(cx,slotY,slotR,0,7); ctx.fill();
+      ctx.fillStyle=i===META.skin?'#5A4410':'#241A4B';
+      ctx.font='900 11px system-ui, Arial';
+      ctx.fillText(String(i+1),cx,slotY+1);
+    } else {
+      ctx.strokeStyle='rgba(120,90,50,.45)';
+      if (game.scene===2||game.scene===4) ctx.strokeStyle='rgba(255,255,255,.45)';
+      ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(cx,slotY,slotR,0,7); ctx.stroke();
+      ctx.fillStyle=ctx.strokeStyle;
+      ctx.font='900 12px system-ui, Arial';
+      ctx.fillText('?',cx,slotY+1);
+    }
+  });
+
+  // collected count + next unlock tease
+  const got=SKINS.filter(s=>META.isUnlocked(s.id)).length;
+  ctx.fillStyle=th.ink;
+  ctx.font='800 11px system-ui, Arial';
+  ctx.fillText(got+' / '+SKINS.length+' EGGS COLLECTED',W/2,H*0.662);
+  const nx=META.nextLocked();
+  ctx.globalAlpha=0.75;
+  ctx.font='800 11px system-ui, Arial';
+  if (nx) {
+    const r=META.remainingTo(nx);
+    ctx.fillText(r.rem+' '+r.label+' TO '+nx.name,W/2,H*0.692);
+  } else {
+    ctx.fillText('ALL EGGS COLLECTED · ABSURD',W/2,H*0.692);
+  }
+  ctx.globalAlpha=1;
 
   // scene selector
   const selY=H*0.72;
@@ -1637,6 +1921,7 @@ function drawTitle() {
 
   // register tap zones
   tapZones=[
+    {x:W/2-78,y:egg.y-66,w:156,h:140,act:'egg'},
     {x:W*0.22-26,y:selY-22,w:52,h:52,act:'prev'},
     {x:W*0.78-26,y:selY-22,w:52,h:52,act:'next'},
     {x:W-48,y:8,w:40,h:30,act:'mute'}
@@ -1689,6 +1974,69 @@ function drawDeathCard() {
   const p=0.5+0.5*Math.sin(game.time*5);
   ctx.globalAlpha=a*p; ctx.fillStyle='#fff'; ctx.font='900 16px system-ui, Arial';
   ctx.fillText('TAP TO RETRY',W/2,py+ph-30);
+  ctx.restore();
+}
+
+/* NEW EGG UNLOCK CELEBRATION */
+function drawUnlockCard() {
+  const u=game.unlockShow; if(!u) return;
+  const s=SKINS[u.id]; if(!s) return;
+  const pop=Math.min(1,u.t/0.35);
+  const ease=1-Math.pow(1-pop,3);
+  ctx.save();
+  ctx.fillStyle='rgba(10,6,25,.6)';
+  ctx.fillRect(0,0,W,H);
+  const pw=W*0.86, ph=Math.min(H*0.5,380);
+  const px=(W-pw)/2, py=H*0.5-ph/2-10;
+  ctx.translate(W/2, py+ph/2);
+  ctx.scale(0.7+0.3*ease,0.7+0.3*ease);
+  ctx.translate(-W/2, -(py+ph/2));
+  // card body
+  ctx.fillStyle='rgba(24,16,52,.96)';
+  roundRect(ctx,px,py,pw,ph,24); ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle='#FFD93D';
+  roundRect(ctx,px,py,pw,ph,24); ctx.stroke();
+  // confetti dots on card edge
+  for (let i=0;i<14;i++){
+    const a=i/14*Math.PI*2+u.t*0.6;
+    const cx=px+pw/2+Math.cos(a)*(pw*0.46);
+    const cy=py+ph/2+Math.sin(a)*(ph*0.44);
+    ctx.fillStyle=['#FFD93D','#FF7AC4','#2DE2E6','#7BE0C4'][i%4];
+    ctx.globalAlpha=0.85;
+    ctx.beginPath(); ctx.arc(cx,cy,2.5,0,7); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.textAlign='center';
+  // header
+  ctx.fillStyle='#FFD93D';
+  ctx.font='900 21px system-ui, Arial';
+  ctx.fillText('NEW EGG FOUND!',W/2,py+38);
+  // mini preview
+  const bob=Math.sin(u.t*3)*4;
+  ctx.save();
+  ctx.translate(W/2,py+ph*0.4+bob);
+  ctx.scale(1.25,1.25);
+  const prevSkin=META.skin; META.skin=u.id;
+  drawEggShellOnly();
+  META.skin=prevSkin;
+  ctx.restore();
+  // name + title
+  ctx.fillStyle='#fff';
+  ctx.font='900 20px system-ui, Arial';
+  ctx.fillText(s.name,W/2,py+ph-92);
+  ctx.fillStyle='#FFE88A';
+  ctx.font='800 11px system-ui, Arial';
+  ctx.fillText('· '+s.title+' ·',W/2,py+ph-70);
+  ctx.fillStyle='rgba(255,255,255,.75)';
+  ctx.font='800 10px system-ui, Arial';
+  const got=SKINS.filter(x=>META.isUnlocked(x.id)).length;
+  ctx.fillText('EGGDEX  '+got+' / '+SKINS.length,W/2,py+ph-50);
+  // continue
+  const p=0.5+0.5*Math.sin(game.time*5);
+  ctx.globalAlpha=p;
+  ctx.fillStyle='#fff';
+  ctx.font='900 15px system-ui, Arial';
+  ctx.fillText('TAP TO CONTINUE',W/2,py+ph-24);
   ctx.restore();
 }
 
@@ -1749,9 +2097,9 @@ function render() {
   // chaos events: quake / flip add a small extra random screen tilt
   let chaosTilt=0, chaosAmt=0;
   if (game.state===STATE.PLAY){
-    if (game.events.includes('quake')) chaosAmt=Math.max(chaosAmt,1);
-    if (game.events.includes('flip'))  chaosAmt=Math.max(chaosAmt,1);
-    if (game.events.includes('wind'))  chaosAmt=Math.max(chaosAmt,0.4);
+    if (game.events.some(e=>e.type==='quake')) chaosAmt=Math.max(chaosAmt,1);
+    if (game.events.some(e=>e.type==='flip'))  chaosAmt=Math.max(chaosAmt,1);
+    if (game.events.some(e=>e.type==='wind'))  chaosAmt=Math.max(chaosAmt,0.4);
   }
   if (chaosAmt>0){
     chaosTilt=(Math.random()-.5)*0.05*chaosAmt;
@@ -1804,7 +2152,7 @@ function render() {
     g2.addColorStop(1,'rgba(40,220,255,0)');
     ctx.fillStyle=g2; ctx.fillRect(W-bw,0,bw,H);
     // tiny vertical jitter fringe top/bottom when flip is on
-    if (game.events.includes('flip')){
+    if (game.events.some(e=>e.type==='flip')){
       let g3=ctx.createLinearGradient(0,0,0,bw);
       g3.addColorStop(0,'rgba(180,80,255,'+a.toFixed(3)+')');
       g3.addColorStop(1,'rgba(180,80,255,0)');
@@ -1827,6 +2175,7 @@ function render() {
     tapZones.push({x:W-48,y:8,w:40,h:30,act:'mute'});
     drawBanner();
     if (game.state===STATE.DEAD) drawDeathCard();
+    if (game.unlockShow) drawUnlockCard();
   }
 
   // flash
