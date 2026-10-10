@@ -3,15 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#150f2e">
-<title>THIS EGG WON'T BREAK</title>
+<meta name="theme-color" content="#FFE8EC">
+<title>EGG CATCH</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { width:100%; height:100%; overflow:hidden; background:#100c22; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#FFE8EC; }
   body { display:flex; align-items:center; justify-content:center;
          font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-  #stage { display:block; touch-action:none; user-select:none; -webkit-user-select:none;
-           box-shadow:0 0 60px rgba(0,0,0,.45); }
+  #stage { display:block; touch-action:none; user-select:none; -webkit-user-select:none; }
 </style>
 </head>
 <body>
@@ -19,9 +18,9 @@
 <script>
 'use strict';
 /* ============================================================
-   THIS EGG WON'T BREAK
-   A one-tap vertical physics meme. Every bounce gets worse.
-   100% single file. All audio synthesized with Web Audio.
+   EGG CATCH
+   A cute egg-catching arcade game. Move left/right, catch eggs,
+   dodge bombs, build combos. 100% single file.
    ============================================================ */
 
 const canvas = document.getElementById('stage');
@@ -42,7 +41,6 @@ function resize() {
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 resize();
-// browser can report 0x0 during very early startup — keep correcting until real
 (function waitForSize(){
   if (!(window.innerWidth>0 && window.innerHeight>0)) { setTimeout(resize, 100); setTimeout(waitForSize,100); }
   else if (!(W>0&&H>0)) resize();
@@ -50,2304 +48,819 @@ resize();
 setTimeout(resize, 300);
 setTimeout(resize, 1000);
 
-/* ---------------- THEMES (5 SCENES) ---------------- */
-const THEMES = [
-  { name:'MORNING YOLK',
-    bg:'#FFF1D6', bgDark:'#E9C98F',
-    egg:'#FFFDF4', eggShade:'#F0DDAE',
-    padA:'#FFB347', padB:'#FF8C42', padC:'#E86A2C',
-    ink:'#5A3A1E', soft:'#FFFFFF',
-    root:261.63, wave:'triangle', glow:'rgba(255,190,90,.55)',
-    pType:'spark' },
-  { name:'COTTON CANDY',
-    bg:'#FFD9EC', bgDark:'#E39BC4',
-    egg:'#FFF8FC', eggShade:'#F2C4DD',
-    padA:'#7FE8C6', padB:'#B084F5', padC:'#8A5CE0',
-    ink:'#5B2D52', soft:'#FFFFFF',
-    root:349.23, wave:'sine', glow:'rgba(176,132,245,.5)',
-    pType:'heart' },
-  { name:'BLUEBERRY NIGHT',
-    bg:'#23265A', bgDark:'#16183C',
-    egg:'#F3F2FF', eggShade:'#B9BCE8',
-    padA:'#7AA2FF', padB:'#5566D6', padC:'#FFD166',
-    ink:'#E8E9FF', soft:'#32366E',
-    root:220.00, wave:'triangle', glow:'rgba(122,162,255,.5)',
-    pType:'star' },
-  { name:'MATCHA ZEN',
-    bg:'#DDECC4', bgDark:'#A6C080',
-    egg:'#FFFEF2', eggShade:'#D8E2B4',
-    padA:'#93C572', padB:'#6FA84F', padC:'#EF6F6C',
-    ink:'#38502A', soft:'#FFFFFF',
-    root:293.66, wave:'sine', glow:'rgba(147,197,114,.55)',
-    pType:'leaf' },
-  { name:'NEON PARTY',
-    bg:'#150F2E', bgDark:'#0B0720',
-    egg:'#FFF9FF', eggShade:'#C9B8F0',
-    padA:'#FF3DAC', padB:'#2DE2E6', padC:'#F7F746',
-    ink:'#F5ECFF', soft:'#241A4B',
-    root:164.81, wave:'sawtooth', glow:'rgba(45,226,230,.5)',
-    pType:'neon' }
-];
-
-/* ---------------- EGG SKINS (META UNLOCKS) ---------------- */
-const SKINS = [
-  { id:0, name:'CLASSIC EGG', title:'EGG OWNER',
-    egg:null, shade:null, kind:'', n:0 },
-  { id:1, name:'GOLDEN EGG', title:'EGG ENTHUSIAST',
-    egg:'#FFE88A', shade:'#D99A1E', kind:'total', n:25 },
-  { id:2, name:'DEVIL EGG', title:'EGG DELINQUENT',
-    egg:'#FF8A7A', shade:'#B23A30', kind:'best', n:10 },
-  { id:3, name:'ROBOT EGG', title:'EGG ENGINEER',
-    egg:'#E4ECF6', shade:'#8A97A8', kind:'reveal', n:3 },
-  { id:4, name:'GALAXY EGG', title:'EGG COSMONAUT', dark:true,
-    egg:'#3A2E78', shade:'#120D30', kind:'best', n:20 }
-];
-
-/* ---------------- META / PERSISTENCE ---------------- */
-const META = {
-  total: parseInt(localStorage.getItem('tewb_total')||'0',10) || 0,
-  reveals: parseInt(localStorage.getItem('tewb_reveals')||'0',10) || 0,
-  seen: parseInt(localStorage.getItem('tewb_seen')||'0',10) || 0,
-  skin: parseInt(localStorage.getItem('tewb_skin')||'0',10) || 0,
-
-  unlockedMask() {
-    let m = 1;
-    if (this.total  >= 25) m |= 2;
-    if (game.best   >= 10) m |= 4;
-    if (this.reveals>= 3) m |= 8;
-    if (game.best   >= 20) m |= 16;
-    return m;
-  },
-  isUnlocked(id) { return !!(this.unlockedMask() & (1<<id)); },
-
-  /* distance remaining to a locked skin; returns {rem, kind} */
-  remainingTo(s) {
-    if (s.kind==='total')  return { rem:Math.max(0,s.n-this.total),  label:'BOUNCES' };
-    if (s.kind==='reveal') return { rem:Math.max(0,s.n-this.reveals),label:'REVEALS' };
-    return { rem:Math.max(0,s.n-game.best), label:'BEST RUN' };
-  },
-  nextLocked() {
-    for (const s of SKINS) if (!this.isUnlocked(s.id)) return s;
-    return null;
-  },
-  select(id) {
-    if (!this.isUnlocked(id)) return;
-    this.skin=id;
-    localStorage.setItem('tewb_skin', String(id));
-  },
-  cycleSkin() {
-    const ids = SKINS.map(s=>s.id).filter(id=>this.isUnlocked(id));
-    const i = ids.indexOf(this.skin);
-    this.select(ids[(i+1)%ids.length]);
-  }
+/* ---------------- PASTEL PALETTE ---------------- */
+const COL = {
+  bgTop:    '#FFF0F3',
+  bgMid:    '#FFE0E8',
+  bgBot:    '#FFD4DD',
+  eggShell: '#FFFFFF',
+  eggShade: '#FFE0E8',
+  eggYolk:  '#FFD93D',
+  eggBlush: '#FFB3C6',
+  gold:     '#FFD93D',
+  goldShade:'#F0B429',
+  heart:    '#FF6B9D',
+  bomb:     '#4A4A5A',
+  bombShade:'#2E2E3A',
+  bombFuse: '#FF8C42',
+  ink:      '#5A4A52',
+  soft:     '#FFF5F8',
+  cloud:    'rgba(255,255,255,0.7)',
+  shadow:   'rgba(180,120,140,0.18)'
 };
 
-/* Evaluate freshly-qualified skins, queue celebrations. Returns #new. */
-function checkUnlocks() {
-  const fresh = META.unlockedMask() & ~META.seen;
-  if (!fresh) return 0;
-  for (let id=1; id<SKINS.length; id++) {
-    if (fresh & (1<<id)) {
-      META.seen |= (1<<id);
-      game.unlockQueue.push(id);
-    }
+/* ---------------- GAME STATE ---------------- */
+const STATE = { TITLE:0, PLAY:1, OVER:2 };
+const game = {
+  state: STATE.TITLE,
+  score: 0,
+  best: parseInt(localStorage.getItem('eggcatch_best')||'0',10) || 0,
+  lives: 3,
+  combo: 0,
+  comboT: 0,
+  time: 0,
+  spawnT: 0,
+  spawnInt: 1.1,
+  speedK: 1,
+  items: [],
+  parts: [],
+  puffs: [],
+  shake: 0,
+  flash: 0,
+  t: 0,
+  startY: 0
+};
+
+/* ---------------- PLAYER (CUTE EGG) ---------------- */
+const player = {
+  x: 0, y: 0, tx: 0,
+  rx: 38, ry: 46,
+  vx: 0,
+  face: 'happy', faceT: 0,
+  squash: 0
+};
+function resetPlayer() {
+  player.x = W/2;
+  player.tx = W/2;
+  player.y = H - 90;
+  player.vx = 0;
+  player.face = 'happy';
+  player.faceT = 0;
+  player.squash = 0;
+}
+
+/* ---------------- INPUT ---------------- */
+let pointerActive = false;
+function setTargetX(px) {
+  player.tx = Math.max(player.rx, Math.min(W-player.rx, px));
+}
+canvas.addEventListener('pointerdown', e=>{
+  pointerActive = true;
+  AU.init();
+  if (game.state===STATE.TITLE) { startGame(); return; }
+  if (game.state===STATE.OVER) { startGame(); return; }
+  setTargetX(e.clientX - canvas.getBoundingClientRect().left);
+});
+canvas.addEventListener('pointermove', e=>{
+  if (!pointerActive || game.state!==STATE.PLAY) return;
+  setTargetX(e.clientX - canvas.getBoundingClientRect().left);
+});
+canvas.addEventListener('pointerup', ()=>{ pointerActive=false; });
+canvas.addEventListener('pointercancel', ()=>{ pointerActive=false; });
+// keyboard
+window.addEventListener('keydown', e=>{
+  if (game.state===STATE.TITLE || game.state===STATE.OVER) {
+    if (e.code==='Space'||e.code==='Enter') { AU.init(); startGame(); }
+    return;
   }
-  localStorage.setItem('tewb_seen', String(META.seen));
-  return fresh;
-}
+  if (e.code==='ArrowLeft'||e.code==='KeyA') player.tx = Math.max(player.rx, player.tx-60);
+  if (e.code==='ArrowRight'||e.code==='KeyD') player.tx = Math.min(W-player.rx, player.tx+60);
+});
 
-/* shell colors for the currently equipped skin (falls back to theme) */
-function shellColors() {
-  const th = THEMES[game.scene], s = SKINS[META.skin] || SKINS[0];
-  return { egg: s.egg || th.egg, shade: s.shade || th.eggShade, dark: !!s.dark, id: s.id };
-}
-
-/* PENTATONIC SEMITONE OFFSETS — every note is always catchy. */
-const PENTA = [0, 2, 4, 7, 9, 12, 14, 16];
-const BOUNCE_SEQ = [0, 2, 4, 5, 7, 5, 4, 2]; // index into PENTA
-const MELODY = [0, 4, 2, 4, 5, 4, 2, 1];      // 8 beats
-const BASS_SEMI = [0, 0, 7, 9];
-
-/* ---------------- AUDIO ENGINE ---------------- */
+/* ---------------- AUDIO ---------------- */
 const AU = {
-  ac:null, master:null, musicBus:null, sfxBus:null, filter:null,
-  tension:0, step:0, nextTime:0, startAt:0, timer:null,
-  seqIdx:0, muted:false,
-
+  ac:null, master:null, musicBus:null, sfxBus:null, muted:false,
+  step:0, nextTime:0, startAt:0, timer:null,
   init() {
     if (this.ac) { if (this.ac.state==='suspended') this.ac.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ac = new AC();
-    this.master = this.ac.createGain(); this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master = this.ac.createGain(); this.master.gain.value = 0.85;
     const comp = this.ac.createDynamicsCompressor();
-    comp.threshold.value = -14; comp.ratio.value = 6;
+    comp.threshold.value=-16; comp.ratio.value=5;
     this.master.connect(comp); comp.connect(this.ac.destination);
-
-    this.filter = this.ac.createBiquadFilter();
-    this.filter.type='lowpass'; this.filter.frequency.value=14000;
-    this.musicBus = this.ac.createGain(); this.musicBus.gain.value=0.5;
+    this.musicBus = this.ac.createGain(); this.musicBus.gain.value=0.35;
     this.sfxBus = this.ac.createGain(); this.sfxBus.gain.value=0.9;
-    this.musicBus.connect(this.filter); this.filter.connect(this.master);
-    this.sfxBus.connect(this.master);
-
-    this.noiseBuf = this.ac.createBuffer(1, this.ac.sampleRate*0.5, this.ac.sampleRate);
+    this.musicBus.connect(this.master); this.sfxBus.connect(this.master);
+    this.noiseBuf = this.ac.createBuffer(1, this.ac.sampleRate*0.4, this.ac.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
     for (let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
-
-    this.step = 0;
-    this.nextTime = this.ac.currentTime + 0.08;
-    this.startAt = this.nextTime;
-    this.timer = setInterval(()=>this.schedule(), 30);
+    this.step=0; this.nextTime=this.ac.currentTime+0.1; this.startAt=this.nextTime;
+    this.timer = setInterval(()=>this.schedule(), 40);
   },
-
-  beatDur() { return 60/130; },          // 130 BPM
-  beatDist() {
-    if (!this.ac) return 1;
-    const b = (this.ac.currentTime - this.startAt)/this.beatDur();
-    const ph = b - Math.floor(b);
-    return Math.min(ph, 1-ph);
-  },
-
+  beatDur() { return 60/100; },
   schedule() {
     if (!this.ac) return;
-    const spb = this.beatDur()/2;       // 16th
-    while (this.nextTime < this.ac.currentTime + 0.18) {
+    const spb = this.beatDur();
+    while (this.nextTime < this.ac.currentTime+0.2) {
       this.runStep(this.step, this.nextTime, spb);
       this.nextTime += spb;
-      this.step = (this.step+1)%16;
+      this.step = (this.step+1)%8;
     }
   },
-
-  theme() { return THEMES[game.scene]; },
-  midiHz(root, semi) { return root * Math.pow(2, semi/12); },
-
-  runStep(s, t, spb) {
-    const th = this.theme();
-    const beat = s%2===0;
-    // KICK four on the floor
-    if (beat) this.kick(t);
-    // HAT offbeats
-    if (!beat) this.hat(t, 0.12);
-    // BASS
-    if (s===0||s===4||s===8||s===12) {
-      const bi = s===0?0 : s===4?0 : s===8?1 : 2;
-      this.tone('sine', this.midiHz(th.root, BASS_SEMI[bi]-24), t, spb*1.8, 0.5, this.musicBus);
-    }
-    // MELODY on beats
-    if (beat) {
-      const mi = s/2;
-      const semi = PENTA[MELODY[mi%MELODY.length]];
-      this.pluck(th.wave, this.midiHz(th.root, semi+12), t, spb*1.6, 0.22);
-    }
-    // TENSION LAYER
-    if (this.tension > 0.55) {
-      if (s%4===0) this.kick(t, 0.5);
-      if (s%2===0) {
-        const o = this.ac.createOscillator(), g = this.ac.createGain();
-        o.type='sawtooth'; o.frequency.value = this.midiHz(th.root,-12);
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(0.12*this.tension, t+0.02);
-        g.gain.exponentialRampToValueAtTime(0.001, t+spb*1.4);
-        o.connect(g); g.connect(this.musicBus);
-        o.start(t); o.stop(t+spb*1.5);
-      }
-    }
+  runStep(s,t,spb) {
+    // soft kick on beat 0 and 4
+    if (s===0||s===4) this.kick(t, 0.25);
+    // gentle pluck melody
+    const melody = [0,4,7,5,7,9,7,5];
+    const semi = melody[s];
+    this.pluck(t, 523.25*Math.pow(2,semi/12), spb*1.2, 0.12);
+    // soft pad
+    if (s===0) this.pad(t, spb*3.5, 0.06);
   },
-
-  tone(type, f, t, dur, vol, dest) {
-    if (!this.ac) return;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type=type; o.frequency.setValueAtTime(f,t);
+  kick(t,vol) {
+    if(!this.ac) return;
+    const o=this.ac.createOscillator(),g=this.ac.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(120,t);
+    o.frequency.exponentialRampToValueAtTime(55,t+0.1);
+    g.gain.setValueAtTime((vol||0.3),t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.15);
+    o.connect(g); g.connect(this.musicBus);
+    o.start(t); o.stop(t+0.17);
+  },
+  pluck(t,f,dur,vol) {
+    if(!this.ac) return;
+    const o=this.ac.createOscillator(),g=this.ac.createGain();
+    o.type='triangle'; o.frequency.setValueAtTime(f,t);
+    o.frequency.exponentialRampToValueAtTime(f*0.995,t+dur);
     g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(vol, t+0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-    o.connect(g); g.connect(dest||this.sfxBus);
-    o.start(t); o.stop(t+dur+0.03);
-  },
-
-  pluck(type, f, t, dur, vol) {
-    if (!this.ac) return;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type=type; o.frequency.setValueAtTime(f,t);
-    o.frequency.exponentialRampToValueAtTime(f*0.992, t+dur);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(vol, t+0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    g.gain.exponentialRampToValueAtTime(vol,t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
     o.connect(g); g.connect(this.musicBus);
     o.start(t); o.stop(t+dur+0.03);
   },
-
-  kick(t, vol) {
-    if (!this.ac) return;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type='sine';
-    o.frequency.setValueAtTime(150,t);
-    o.frequency.exponentialRampToValueAtTime(44,t+0.12);
-    g.gain.setValueAtTime(0.55*(vol||1),t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.16);
-    o.connect(g); g.connect(this.musicBus);
-    o.start(t); o.stop(t+0.18);
-  },
-
-  hat(t, vol) {
-    if (!this.ac) return;
-    const src=this.ac.createBufferSource(); src.buffer=this.noiseBuf;
-    const f=this.ac.createBiquadFilter(); f.type='highpass'; f.frequency.value=7000;
-    const g=this.ac.createGain();
-    g.gain.setValueAtTime(vol,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.04);
-    src.connect(f); f.connect(g); g.connect(this.musicBus);
-    src.start(t); src.stop(t+0.06);
-  },
-
-  /* ---- gameplay SFX ---- */
-  bounce(freq, perfect) {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    // boing spring: pitch swoop
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type='triangle';
-    o.frequency.setValueAtTime(freq*1.7,t);
-    o.frequency.exponentialRampToValueAtTime(freq,t+0.14);
-    o.frequency.exponentialRampToValueAtTime(freq*0.9,t+0.3);
-    g.gain.setValueAtTime(0.0001,t);
-    g.gain.exponentialRampToValueAtTime(perfect?0.5:0.4,t+0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.34);
-    o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t+0.38);
-    // soft thock body
-    this.tone('sine', freq*0.5, t, 0.12, 0.25, this.sfxBus);
-  },
-
-  tap() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type='square'; o.frequency.setValueAtTime(520,t);
-    o.frequency.exponentialRampToValueAtTime(340,t+0.05);
-    g.gain.setValueAtTime(0.1,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.07);
-    o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t+0.09);
-    // soft click body
-    const o2=this.ac.createOscillator(), g2=this.ac.createGain();
-    o2.type='triangle'; o2.frequency.setValueAtTime(760,t);
-    o2.frequency.exponentialRampToValueAtTime(620,t+0.04);
-    g2.gain.setValueAtTime(0.08,t);
-    g2.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
-    o2.connect(g2); g2.connect(this.sfxBus);
-    o2.start(t); o2.stop(t+0.07);
-  },
-
-  /* soft low thunk for a wall clip */
-  bump() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type='sine'; o.frequency.setValueAtTime(190,t);
-    o.frequency.exponentialRampToValueAtTime(110,t+0.09);
-    g.gain.setValueAtTime(0.16,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.11);
-    o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t+0.13);
-  },
-
-  crackStep() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    const src=this.ac.createBufferSource(); src.buffer=this.noiseBuf;
-    const f=this.ac.createBiquadFilter(); f.type='bandpass'; f.frequency.value=2600; f.Q.value=2;
-    const g=this.ac.createGain();
-    g.gain.setValueAtTime(0.18,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.1);
-    src.connect(f); f.connect(g); g.connect(this.sfxBus);
-    src.start(t); src.stop(t+0.12);
-  },
-
-  duckWah() {
-    if (!this.ac) return;
-    const base=this.ac.currentTime;
-    const notes=[330,247,196];
-    notes.forEach((f,i)=>{
-      const t=base+i*0.26;
-      const o=this.ac.createOscillator(), g=this.ac.createGain(), f1=this.ac.createBiquadFilter();
-      o.type='sawtooth'; o.frequency.setValueAtTime(f,t);
-      o.frequency.linearRampToValueAtTime(f*0.94,t+0.22);
-      f1.type='lowpass';
-      f1.frequency.setValueAtTime(900,t);
-      f1.frequency.linearRampToValueAtTime(500,t+0.22);
+  pad(t,dur,vol) {
+    if(!this.ac) return;
+    const freqs=[261.63,329.63,392.00];
+    freqs.forEach(f=>{
+      const o=this.ac.createOscillator(),g=this.ac.createGain();
+      o.type='sine'; o.frequency.value=f;
       g.gain.setValueAtTime(0.0001,t);
-      g.gain.linearRampToValueAtTime(0.34,t+0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001,t+0.24);
-      o.connect(f1); f1.connect(g); g.connect(this.sfxBus);
-      o.start(t); o.stop(t+0.27);
+      g.gain.exponentialRampToValueAtTime(vol,t+0.1);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+      o.connect(g); g.connect(this.musicBus);
+      o.start(t); o.stop(t+dur+0.05);
     });
   },
-
-  yoink() {
-    if (!this.ac) return;
+  catch(perfect) {
+    if(!this.ac) return;
     const t=this.ac.currentTime;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type='square';
-    o.frequency.setValueAtTime(220,t);
-    o.frequency.exponentialRampToValueAtTime(1400,t+0.28);
-    g.gain.setValueAtTime(0.2,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.3);
-    o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t+0.33);
-  },
-
-  plok() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    this.tone('sine', 880, t, 0.09, 0.4, this.sfxBus);
-    this.tone('sine', 440, t+0.02, 0.12, 0.3, this.sfxBus);
-  },
-
-  // absurd reveal sound — wet rubber duck into a goofy honk
-  absurdHonk() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    // rubber squeak
-    const sq=this.ac.createOscillator(), sg=this.ac.createGain();
-    sq.type='square'; sq.frequency.setValueAtTime(2000,t);
-    sq.frequency.exponentialRampToValueAtTime(800,t+0.12);
-    sg.gain.setValueAtTime(0.18,t);
-    sg.gain.exponentialRampToValueAtTime(0.001,t+0.15);
-    sq.connect(sg); sg.connect(this.sfxBus);
-    sq.start(t); sq.stop(t+0.17);
-    // cartoon honk
-    setTimeout(()=>{
-      if (!this.ac) return;
-      const t2=this.ac.currentTime;
-      for (let i=0;i<3;i++){
-        const o=this.ac.createOscillator(), g=this.ac.createGain();
-        o.type='sawtooth'; o.frequency.setValueAtTime(180+i*60,t2);
-        g.gain.setValueAtTime(0.2,t2);
-        g.gain.exponentialRampToValueAtTime(0.001,t2+0.25);
-        o.connect(g); g.connect(this.sfxBus);
-        o.start(t2); o.stop(t2+0.27);
-      }
-    },200);
-    // tiny boing
-    setTimeout(()=>{
-      if (!this.ac) return;
-      const t3=this.ac.currentTime;
-      const o=this.ac.createOscillator(), g=this.ac.createGain();
-      o.type='triangle'; o.frequency.setValueAtTime(400,t3);
-      o.frequency.exponentialRampToValueAtTime(600,t3+0.15);
-      o.frequency.exponentialRampToValueAtTime(200,t3+0.4);
-      g.gain.setValueAtTime(0.25,t3);
-      g.gain.exponentialRampToValueAtTime(0.001,t3+0.42);
-      o.connect(g); g.connect(this.sfxBus);
-      o.start(t3); o.stop(t3+0.45);
-    },420);
-  },
-
-  whistleDown() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
+    const o=this.ac.createOscillator(),g=this.ac.createGain();
     o.type='sine';
-    o.frequency.setValueAtTime(900,t);
-    o.frequency.exponentialRampToValueAtTime(70,t+0.7);
-    g.gain.setValueAtTime(0.3,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.75);
+    const f0 = perfect ? 880 : 660;
+    o.frequency.setValueAtTime(f0,t);
+    o.frequency.exponentialRampToValueAtTime(f0*1.5,t+0.1);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(0.3,t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+0.2);
     o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t+0.8);
+    o.start(t); o.stop(t+0.22);
   },
-
-  splat() {
-    if (!this.ac) return;
+  gold() {
+    if(!this.ac) return;
+    const t=this.ac.currentTime;
+    [880,1108,1318].forEach((f,i)=>{
+      const o=this.ac.createOscillator(),g=this.ac.createGain();
+      o.type='triangle'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001,t+i*0.06);
+      g.gain.exponentialRampToValueAtTime(0.22,t+i*0.06+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+i*0.06+0.18);
+      o.connect(g); g.connect(this.sfxBus);
+      o.start(t+i*0.06); o.stop(t+i*0.06+0.2);
+    });
+  },
+  heart() {
+    if(!this.ac) return;
+    const t=this.ac.currentTime;
+    [523,659,784,1046].forEach((f,i)=>{
+      const o=this.ac.createOscillator(),g=this.ac.createGain();
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001,t+i*0.08);
+      g.gain.exponentialRampToValueAtTime(0.2,t+i*0.08+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+i*0.08+0.3);
+      o.connect(g); g.connect(this.sfxBus);
+      o.start(t+i*0.08); o.stop(t+i*0.08+0.32);
+    });
+  },
+  boom() {
+    if(!this.ac) return;
     const t=this.ac.currentTime;
     const src=this.ac.createBufferSource(); src.buffer=this.noiseBuf;
-    const f=this.ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=900;
+    const f=this.ac.createBiquadFilter(); f.type='lowpass'; f.frequency.setValueAtTime(800,t);
+    f.frequency.exponentialRampToValueAtTime(100,t+0.3);
     const g=this.ac.createGain();
     g.gain.setValueAtTime(0.5,t);
-    g.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.35);
     src.connect(f); f.connect(g); g.connect(this.sfxBus);
-    src.start(t); src.stop(t+0.25);
-    this.tone('sine', 160, t, 0.18, 0.4, this.sfxBus);
+    src.start(t); src.stop(t+0.4);
+    const o=this.ac.createOscillator(),g2=this.ac.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(120,t);
+    o.frequency.exponentialRampToValueAtTime(40,t+0.3);
+    g2.gain.setValueAtTime(0.4,t); g2.gain.exponentialRampToValueAtTime(0.001,t+0.3);
+    o.connect(g2); g2.connect(this.sfxBus);
+    o.start(t); o.stop(t+0.32);
   },
-
-  boing() {
-    if (!this.ac) return;
+  over() {
+    if(!this.ac) return;
     const t=this.ac.currentTime;
-    const o=this.ac.createOscillator(), g=this.ac.createGain();
-    o.type='sine'; o.frequency.setValueAtTime(200,t);
-    o.frequency.exponentialRampToValueAtTime(500,t+0.08);
-    o.frequency.exponentialRampToValueAtTime(180,t+0.22);
-    g.gain.setValueAtTime(0.22,t);
-    g.gain.exponentialRampToValueAtTime(0.001,t+0.24);
-    o.connect(g); g.connect(this.sfxBus);
-    o.start(t); o.stop(t+0.26);
-  },
-
-  pow() {
-    if (!this.ac) return;
-    const t=this.ac.currentTime;
-    const src=this.ac.createBufferSource(); src.buffer=this.noiseBuf;
-    const f=this.ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1800;
-    const g=this.ac.createGain();
-    g.gain.setValueAtTime(0.28,t);
-    g.gain.exponentialRampToValueAtTime(0.001,t+0.1);
-    src.connect(f); f.connect(g); g.connect(this.sfxBus);
-    src.start(t); src.stop(t+0.12);
-    this.tone('square', 120, t, 0.1, 0.15, this.sfxBus);
-  },
-
-  /* ---- milestone / unlock fanfare ---- */
-  milestone(level) {
-    if (!this.ac) return;
-    const th=this.theme();
-    const t=this.ac.currentTime;
-    [0,4,7,12].forEach((s,i)=>{
-      this.tone('triangle', th.root*Math.pow(2,(s+12+level*2)/12),
-        t+i*0.07, 0.16, 0.3, this.sfxBus);
+    [523,415,330,262].forEach((f,i)=>{
+      const o=this.ac.createOscillator(),g=this.ac.createGain();
+      o.type='triangle'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001,t+i*0.15);
+      g.gain.exponentialRampToValueAtTime(0.2,t+i*0.15+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+i*0.15+0.4);
+      o.connect(g); g.connect(this.sfxBus);
+      o.start(t+i*0.15); o.stop(t+i*0.15+0.42);
     });
-    this.pluck('sine', th.root*Math.pow(2,(16+level*2)/12), t+0.24, 0.2, 0.2);
-  },
-
-  unlockFanfare() {
-    if (!this.ac) return;
-    const th=this.theme();
-    const t=this.ac.currentTime;
-    [0,4,7,12,16].forEach((s,i)=>{
-      this.tone(i%2?'square':'triangle',
-        th.root*Math.pow(2,(s+12)/12), t+i*0.09, 0.3,
-        i===4?0.3:0.2, this.sfxBus);
-    });
-    this.pluck('sine', th.root*4, t+0.5, 0.25, 0.18);
-  },
-
-  setMuted(m) {
-    this.muted=m;
-    if (this.ac) this.master.gain.linearRampToValueAtTime(m?0:0.9, this.ac.currentTime+0.05);
-  },
-  hardMute(m) {
-    if (!this.ac) return;
-    this.master.gain.cancelScheduledValues(this.ac.currentTime);
-    this.master.gain.setValueAtTime(m?0:(this.muted?0:0.9), this.ac.currentTime);
   }
 };
 
-/* ---------------- GAME STATE ---------------- */
-const STATE = { TITLE:0, PLAY:1, REVEAL:2, DEAD:3 };
-
-const game = {
-  state: STATE.TITLE,
-  scene: parseInt(localStorage.getItem('tewb_scene')||'0',10) || 0,
-  best: parseInt(localStorage.getItem('tewb_best')||'0',10) || 0,
-  score:0, perfects:0, combo:0, comboT:0,
-  time:0, hitStop:0,
-  banner:null, flash:0,
-  camY:0, shake:0, zoom:1,
-  speedK:1, events:[],
-  barrelRoll:0, rainbow:0, rainbowHue:0,
-  thought:null, thoughtT:0,
-  revealCount:0, goal:10,
-  unlockQueue:[], unlockShow:null
-};
-
-/* ---------------- EGG ---------------- */
-const EGG_RX = 44, EGG_RY = 56;
-const egg = {
-  x:0, y:0, vx:0, vy:0,
-  rot:0, vr:0,
-  sx:1, sy:1, svx:0, svy:0,     // squash velocity
-  face:'idle', faceT:0,
-  lookX:0, lookY:0, blink:0, nextBlink:2,
-  crack:0, cracks:[],
-  bounceN:0, tier:1,
-  alive:true, smug:0,
-  lean:0, trailT:0
-};
-
-function resetEgg() {
-  egg.x=W/2; egg.y=H*0.30;
-  egg.vx=0; egg.vy=0;
-  egg.rot=0; egg.vr=0;
-  egg.sx=1; egg.sy=1; egg.svx=0; egg.svy=0;
-  egg.face='idle'; egg.faceT=0;
-  egg.lookX=0; egg.lookY=0; egg.blink=0; egg.nextBlink=1.5+Math.random()*2;
-  egg.crack=0; egg.cracks=[];
-  egg.bounceN=0; egg.tier=1;
-  egg.alive=true; egg.smug=0;
-  egg.lean=0; egg.trailT=0;
-}
-
-/* ---------------- PADS ---------------- */
-const pads = [];
-function makePad(y) {
+/* ---------------- ITEMS (falling objects) ---------------- */
+const ITEM_TYPES = ['egg','gold','heart','bomb'];
+function spawnItem() {
   const r = Math.random();
-  const type = r<0.55 ? 'pillow' : r<0.85 ? 'jelly' : 'tramp';
-  const margin=78;
-  return {
-    x: margin + Math.random()*(W-margin*2),
-    y: y,
-    hw: type==='tramp' ? 56+Math.random()*18 : 62+Math.random()*26,
-    type: type,
-    press:0, wob: Math.random()*Math.PI*2,
-    move: Math.random()<Math.min(0.12+game.speedK*0.08,0.5) ? (Math.random()<.5?-1:1)*(24+Math.random()*30) : 0,
-    homeX:0, seed: Math.random()*100,
-    used:false
-  };
+  let type;
+  const bombChance = Math.min(0.18 + game.speedK*0.02, 0.28);
+  const heartChance = 0.06;
+  const goldChance = 0.12;
+  if (r < bombChance) type='bomb';
+  else if (r < bombChance+heartChance) type='heart';
+  else if (r < bombChance+heartChance+goldChance) type='gold';
+  else type='egg';
+  const margin = 30;
+  const x = margin + Math.random()*(W-margin*2);
+  const speed = (120 + game.speedK*40) * (0.85+Math.random()*0.3);
+  game.items.push({
+    type, x, y: -40,
+    vy: speed,
+    vx: (Math.random()-0.5)*30,
+    r: type==='bomb'?24 : type==='heart'?20 : 22,
+    rot: Math.random()*Math.PI*2,
+    vr: (Math.random()-0.5)*3,
+    caught:false
+  });
 }
-function initPads() {
-  pads.length=0;
-  let y = H*0.42;
-  pads.push({x:W/2,y:y,hw:90,type:'pillow',press:0,wob:0,move:0,homeX:0,seed:1,used:false});
-  while (y < H*2 + 400) { y += padGap(); pads.push(makePad(y)); }
-}
-function padGap() {
-  const T = AU.beatDur()*2;
-  const g = 2200*game.speedK;
-  const V = bounceV();
-  const up = V/g;
-  const h = V*V/(2*g);
-  let S = g*(T-up)*(T-up)/2 - h;
-  S -= Math.min(egg.tier>4?40:0, 60);
-  return Math.max(170, S + (Math.random()*26-13));
-}
-function bounceV() {
-  let V = 748;
-  if (egg.tier>=4) V = 905;
-  return V*Math.sqrt(game.speedK);
-}
-function gravityG() { return 2200*game.speedK; }
 
 /* ---------------- PARTICLES ---------------- */
-const parts = [];
-const waves = [];
-function burst(x,y,strong) {
-  const th = THEMES[game.scene];
-  const n = strong?22:12;
-  for (let i=0;i<n;i++) {
+function addPart(x,y,count,color,opts) {
+  opts = opts||{};
+  for (let i=0;i<count;i++) {
     const a = Math.random()*Math.PI*2;
-    const sp = 60+Math.random()*(strong?340:220);
-    parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-60,
-      life:0, max:0.45+Math.random()*0.5, sz:2.5+Math.random()*4.5,
-      rot:Math.random()*6.28, vr:(Math.random()-.5)*9,
-      c: Math.random()<.5?th.padA:(Math.random()<.5?th.padB:th.padC),
-      kind:th.pType, ambient:false});
+    const sp = (opts.sp||120)*(0.4+Math.random()*0.8);
+    game.parts.push({
+      x, y,
+      vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - (opts.up||0),
+      life:0, max:opts.max||0.5,
+      sz:opts.sz||(2+Math.random()*3),
+      c:color, rot:Math.random()*Math.PI*2, vr:(Math.random()-0.5)*8,
+      kind:opts.kind||'dot', gravity:opts.g!=null?opts.g:200
+    });
   }
 }
-function ambient() {
-  const th = THEMES[game.scene];
-  if (parts.filter(p=>p.ambient).length > 90) return;
-  let vx=0, vy=-20, sz=3+Math.random()*4;
-  if (th.pType==='leaf') { vy=26+Math.random()*30; vx=-30; sz=5+Math.random()*5; }
-  if (th.pType==='star') { vy=0; sz=1.5+Math.random()*2.2; }
-  if (th.pType==='neon') { vy=30+Math.random()*40; sz=2.5+Math.random()*4; }
-  parts.push({x:Math.random()*W, y: th.pType==='leaf'||th.pType==='neon' ? -10 : Math.random()*H,
-    vx:vx+(Math.random()*20-10), vy:vy+(Math.random()*20-10),
-    life:0, max:2.5+Math.random()*3, sz:sz,
-    rot:Math.random()*6.28, vr:(Math.random()-.5)*4,
-    c: Math.random()<.5?th.padA:th.padB, kind:th.pType, ambient:true,
-    tw:Math.random()*6.28});
+function addPuff(x,y,color) {
+  game.puffs.push({x,y,r:4,maxR:28,life:0,max:0.4,c:color});
 }
 
-/* ---------------- CRACKS ---------------- */
-function addCrack(hard) {
-  if (egg.cracks.length>=15) return;
-  const pts=[];
-  let x=(Math.random()*30-15), y=EGG_RY*(0.78+Math.random()*0.2);
-  pts.push([x,y]);
-  const segs=3+Math.floor(Math.random()*3);
-  let dir=-Math.PI/2+(Math.random()*0.9-0.45);
-  for (let i=0;i<segs;i++){
-    const len=11+Math.random()*13;
-    dir += Math.random()*0.7-0.35;
-    x+=Math.cos(dir)*len; y+=Math.sin(dir)*len;
-    pts.push([x,y]);
+/* ---------------- GAME FLOW ---------------- */
+function startGame() {
+  game.state = STATE.PLAY;
+  game.score = 0;
+  game.lives = 3;
+  game.combo = 0;
+  game.comboT = 0;
+  game.time = 0;
+  game.spawnT = 0;
+  game.spawnInt = 1.1;
+  game.speedK = 1;
+  game.items.length = 0;
+  game.parts.length = 0;
+  game.puffs.length = 0;
+  game.shake = 0;
+  game.flash = 0;
+  resetPlayer();
+}
+function gameOver() {
+  game.state = STATE.OVER;
+  if (game.score > game.best) {
+    game.best = game.score;
+    localStorage.setItem('eggcatch_best', String(game.best));
   }
-  egg.cracks.push({pts:pts, p:0, w:hard?2.6:2});
-  // branch
-  if (hard && pts.length>2 && egg.cracks.length<15) {
-    const b=[pts[1]], bx=pts[1][0], by=pts[1][1];
-    let bd=dir+(Math.random()<.5?1:-1)*(0.7+Math.random()*0.6), cx=bx, cy=by;
-    for (let i=0;i<2+Math.floor(Math.random()*2);i++){
-      const len=9+Math.random()*9;
-      cx+=Math.cos(bd)*len; cy+=Math.sin(bd)*len;
-      b.push([cx,cy]); bd+=Math.random()*0.6-0.3;
-    }
-    egg.cracks.push({pts:b,p:0,w:1.7});
-  }
+  AU.over();
 }
 
-/* ---------------- BANNERS ---------------- */
-function banner(text, sub) { game.banner={text:text, sub:sub||'', t:0, dur:1.5}; }
-
-/* ---------------- FLOW ---------------- */
-function startRun() {
-  if (window.L) window.L('startRun');
-  game.score=0; game.perfects=0; game.combo=0; game.comboT=0;
-  game.time=0; game.speedK=1;
-  game.camY=0; game.shake=0; game.zoom=1; game.flash=0;
-  game.events=[]; game.barrelRoll=0; game.rainbow=0;
-  game.thought=null; game.thoughtT=0; game.revealCount=0;
-  game.goal=10; game.unlockShow=null;
-  resetEgg();
-  initPads();
-  AU.tension=0; AU.seqIdx=0;
-  game.state=STATE.PLAY;
-  banner('HOLD THE EGG.', 'tap to flip');
-}
-
-function tierFor(n) {
-  if (n>=6) return 6;
-  return n;
-}
-const TIER_BANNERS = {
-  2:['IT SPINS NOW.','why is it doing that'],
-  3:['SIDE EGG.','horizontal crimes against god'],
-  4:['BASKETBALL MODE.','dribble dribble yoink'],
-  5:['IT HAS A FACE.','it is looking at you'],
-  6:['IT IS AVOIDING YOU.','the egg hates you specifically']
-};
-const REVEAL_LINES = [
-  'sup.','deal with it.','i live here now.','you cannot kill me.','this shell is rented.','i do what i want.','nice try, buddy.','egg rights.','get owned.','touch grass.'
-];
-const DEATH_MSGS = [
-  ['IT IS A PANCAKE NOW.', 'the egg is fine. YOU lost.'],
-  ['SPLAT.', 'you did this to yourself.'],
-  ['EGG: 1   YOU: 0', 'absolute egg behavior'],
-  ['IT CHOSE VIOLENCE.', 'the egg wins again.'],
-  ['FLAT EGG TRUTH.', 'you were never the protagonist.'],
-  ['EGG STATUS: SMUG', 'it does not care.'],
-  ['Y O L K E D.', 'eggpeed out of existence.'],
-  ['GAME OVER EGG.', 'the egg is disappointed. not mad. just disappointed.'],
-  ['EGG-ZITED.', 'it left the building.'],
-  ['SHELVING IT.', 'the egg gave up on you.']
-];
-const THOUGHTS = ['why','no','again?','you suck at this','i am egg','stop','help','lol','bruh','nice','gg','why me','suffer','bone?','i tire','oh no','not this','really?','embarrassing','egg'];
-const COMBO_LINES = ['STYLISH!','DISGUSTING!','EGGCELLENT!','UNHINGED!','GROSS!','STOP!','BANNED!','ILLEGAL!','OH NO!','YIKES!','EGG!','TOO FAR!'];
-
-/* nearest pad below the egg — the one it is currently travelling toward */
-function nextPad() {
-  let np=null;
-  for (const p of pads) {
-    if (p.y > egg.y + 24 && (!np || p.y < np.y)) np=p;
-  }
-  return np;
-}
-
-/* simulate current flight to the next pad's top (flip/wind/drag/walls/moving pads).
-   returns {pad,x,px,on} or null */
-function predictLanding() {
-  const pad = nextPad();
-  if (!pad) return null;
-  const flip = game.events.some(e=>e.type==='flip');
-  const windE = game.events.find(e=>e.type==='wind');
-  const g = gravityG()*(flip?-1:1);
-  const top = pad.y - 16;
-  let x=egg.x, y=egg.y, vx=egg.vx, vy=egg.vy, t=game.time;
-  const h=1/120;
-  for (let i=0;i<360;i++) {
-    vy += g*h;
-    if (windE) vx += windE.dir*260*h;
-    vx *= Math.pow(0.995,h*60);
-    x += vx*h; y += vy*h; t += h;
-    if (x<EGG_RX){ x=EGG_RX; vx=Math.abs(vx)*0.7; }
-    if (x>W-EGG_RX){ x=W-EGG_RX; vx=-Math.abs(vx)*0.7; }
-    if (vy>0 && y>=top) {
-      const px = pad.move ? pad.homeX + Math.sin(t*1.4+pad.seed)*pad.move : pad.x;
-      return { pad, x:Math.max(10,Math.min(W-10,x)), px, on:Math.abs(x-px)<pad.hw };
-    }
-  }
-  return null;
-}
-
-/* small air burst pushed opposite to a steering flip */
-function steerPuff(dir) {
-  for (let i=0;i<3;i++) {
-    parts.push({x:egg.x-dir*EGG_RX*0.75, y:egg.y+(Math.random()-0.5)*24,
-      vx:-dir*(50+Math.random()*70), vy:(Math.random()-0.5)*55,
-      life:0,max:0.32,sz:2+Math.random()*2.5,rot:0,vr:0,
-      c:'#FFFFFF',kind:'dot',ambient:false});
-  }
-}
-
-/* dust puff when the egg clips a side wall */
-function wallBump(side) {
-  for (let i=0;i<7;i++) {
-    parts.push({x:egg.x+side*EGG_RX, y:egg.y+(Math.random()-0.5)*EGG_RX*1.2,
-      vx:side*(60+Math.random()*120), vy:(Math.random()-0.5)*160,
-      life:0,max:0.35,sz:2+Math.random()*2.5,rot:0,vr:0,
-      c:'#FFFFFF',kind:'dot',ambient:false});
-  }
-  game.shake=Math.max(game.shake,2.6);
-  AU.bump();
-  if (navigator.vibrate) navigator.vibrate(10);
-}
-
-function doBounce(pad) {
-  if (window.L) window.L('BOUNCE on padY='+(pad.y|0)+' padX='+(pad.x|0)+' eggX='+(egg.x|0));
-  const prevTier=egg.tier;
-  egg.bounceN++;
-  game.score++;
-  META.total++;
-  localStorage.setItem('tewb_total', String(META.total));
-  egg.tier=tierFor(egg.bounceN);
-  pad.used=true; pad.press=1;
-
-  const V=bounceV();
-  egg.vy=-V;
-
-  // landing quality
-  const dxn=Math.abs(egg.x-pad.x)/pad.hw;
-  const hard = dxn>0.62;
-  const onBeat = AU.beatDist()<0.13;
-  const perfect = dxn<0.35 && onBeat;
-
-  // squash & stretch
-  egg.sy=perfect?0.5:(hard?0.62:0.56);
-  egg.sx=perfect?1.5:1.4;
-  egg.svy=0; egg.svx=0;
-
-  // spin behavior per tier
-  if (egg.tier===1) egg.vr=(Math.random()-0.5)*1.2;
-  if (egg.tier===2) egg.vr=7.5*(egg.vx>=0?1:-1)*(Math.random()<.5?1:1);
-  if (egg.tier===3) { egg.vr=5; egg.vx += (Math.random()<.5?-1:1)*90; egg.rot += 0.3; }
-  if (egg.tier===4) { egg.vr=11*(Math.random()<.5?1:-1); }
-  if (egg.tier>=5) egg.vr = egg.tier===6?4:2.2;
-
-  // crack growth
-  const add = (hard?16:9) + egg.tier*1.4 + Math.random()*5;
-  egg.crack=Math.min(100, egg.crack+add);
-  addCrack(hard);
-  AU.crackStep();
-
-  // sound — distinct pitch, always pentatonic
-  const th=THEMES[game.scene];
-  const semi=PENTA[BOUNCE_SEQ[AU.seqIdx%BOUNCE_SEQ.length]];
-  AU.seqIdx++;
-  AU.bounce(th.root*Math.pow(2,(semi+12)/12), perfect);
-
-  // fx
-  burst(pad.x, pad.y-14, hard);
-  waves.push({x:pad.x,y:pad.y-10,r:8,max:hard?150:110,t:0});
-  game.shake=hard?13:7;
-  game.hitStop=hard?0.07:0.045;
-
-  // comic popup text on hard hits
-  if (hard) {
-    const pops=['BOING','POW','THUNK','WHAM','THWAP','KRUNCH'];
-    parts.push({x:pad.x,y:pad.y-30,vx:(Math.random()-0.5)*40,vy:-80-Math.random()*40,
-      life:0,max:0.6,sz:0,rot:0,vr:0,
-      c:'#fff',kind:'text',text:pops[Math.floor(Math.random()*pops.length)],ambient:false});
-    AU.boing();
-  } else if (perfect) {
-    parts.push({x:pad.x,y:pad.y-30,vx:(Math.random()-0.5)*40,vy:-100,
-      life:0,max:0.7,sz:0,rot:0,vr:0,
-      c:'#FFD93D',kind:'text',text:'PERFECT!',ambient:false});
-    AU.pow();
-  }
-  game.flash=perfect?0.35:0.12;
-  if ((perfect||hard)&&navigator.vibrate) navigator.vibrate(perfect?9:14);
-
-  // face
-  if (egg.tier>=5) {
-    egg.face=perfect?'wow':hard?'panic':'happy';
-    egg.faceT=0.5;
-  }
-
-  if (perfect) { game.perfects++; game.combo++; game.comboT=2.2; }
-  else game.combo=0;
-
-  // combo callout
-  if (game.combo>=3 && Math.random()<0.6) {
-    banner(COMBO_LINES[Math.floor(Math.random()*COMBO_LINES.length)], game.combo+' IN A ROW');
-  }
-
-  // random egg thought
-  if (Math.random()<0.18) {
-    game.thought=THOUGHTS[Math.floor(Math.random()*THOUGHTS.length)];
-    game.thoughtT=1.4;
-  }
-
-  // barrel roll chance on hard hits
-  if (hard && Math.random()<0.12) game.barrelRoll=1;
-
-  // rainbow chaos on high combo
-  if (game.combo>=5) { game.rainbow=1.5; }
-
-  // MILESTONE GOAL (reward can save a near-100 shell)
-  const goalHit = egg.bounceN>=game.goal;
-  if (goalHit) hitMilestone();
-
-  if (egg.tier!==prevTier && TIER_BANNERS[egg.tier] && !goalHit) {
-    banner(TIER_BANNERS[egg.tier][0], TIER_BANNERS[egg.tier][1]);
-  }
-
-  // META UNLOCK — claim card after the run (don't bury a milestone banner)
-  if (checkUnlocks() && !goalHit) banner('NEW EGG FOUND!', 'collect it after this run');
-
-  // REVEAL TRIGGER
-  if (egg.crack>=100) enterReveal();
-}
-
-/* goal reached: bonus + bounded shell relief + gold celebration */
-function hitMilestone() {
-  const g = game.goal;
-  const level = Math.max(0, Math.round(g/5) - 2);   // 10->0, 15->1 ...
-  AU.milestone(level);
-  game.score += 3;
-  egg.crack = Math.max(0, egg.crack - 18);
-  game.flash = 0.45; game.zoom = 1.09;
-  game.shake = Math.max(game.shake, 6);
-  goldBurst(egg.x, egg.y);
-  parts.push({x:egg.x,y:egg.y-EGG_RY-14,vx:0,vy:-70,
-    life:0,max:0.8,sz:0,rot:0,vr:0,
-    c:'#FFE88A',kind:'text',text:'WAXED!',ambient:false});
-  parts.push({x:egg.x+34,y:egg.y-EGG_RY+4,vx:0,vy:-60,
-    life:0,max:0.7,sz:0,rot:0,vr:0,
-    c:'#FFF6C9',kind:'text',text:'+3',ambient:false});
-  banner('GOAL '+g+' · WAXED!', '+3 BONUS · SHELL REINFORCED');
-  game.goal += 5;
-}
-
-/* gold star/confetti burst in world space */
-function goldBurst(x,y) {
-  const cols=['#FFE88A','#FFD93D','#FFF6C9','#F7B733','#FFFFFF'];
-  for (let i=0;i<22;i++) {
-    const a=-Math.PI/2+(Math.random()-0.5)*2.3;
-    const sp=120+Math.random()*210;
-    parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-30,
-      life:0,max:0.65+Math.random()*0.5,sz:3+Math.random()*4,
-      rot:Math.random()*6.28,vr:(Math.random()-.5)*9,
-      c:cols[i%cols.length],kind:i%3===0?'star':'dot',ambient:false});
-  }
-}
-
-function enterReveal() {
-  game.state=STATE.REVEAL;
-  game.revealCount++;
-  META.reveals++;
-  localStorage.setItem('tewb_reveals', String(META.reveals));
-  checkUnlocks();   // card waits until the run ends
-  game.rv={t:0, phase:0, ducked:false, yoinked:false, closed:false, line:REVEAL_LINES[Math.floor(Math.random()*REVEAL_LINES.length)]};
-  egg.vy=-60; egg.vx=0; egg.vr=0;
-  if (egg.tier>=5){ egg.face='shock'; egg.faceT=9; }
-  game.zoom=1.14; game.shake=18;
-  game.flash=0.6; game.barrelRoll=1;
-  waves.push({x:egg.x,y:egg.y,r:10,max:220,t:0});
-}
-
-function finishReveal() {
-  egg.crack=0;
-  egg.cracks.forEach(c=>c.fade=true);
-  setTimeout(()=>{ egg.cracks=[]; }, 650);
-  game.speedK=Math.min(game.speedK+0.14, 2.1);
-  AU.tension=0;
-  egg.vy=-bounceV();
-  egg.sy=0.6; egg.sx=1.42;
-  if (egg.tier>=5){ egg.face='happy'; egg.faceT=0.8; }
-  // the reveal line text
-  banner(game.rv.line.toUpperCase(), 'it is still here');
-  game.state=STATE.PLAY;
-  // after 2nd+ reveal, escalate events
-  maybeEvent(game.revealCount);
-}
-
-function maybeEvent(reveals) {
-  const r=Math.random();
-  const extra = reveals||0;
-  if (r<0.18+extra*0.05) { game.events.push({type:'reverse', t:6}); banner('CONTROLS ARE REVERSED.','chaos'); }
-  else if (r<0.40+extra*0.05) { game.events.push({type:'wind', t:5, dir:Math.random()<.5?-1:1}); banner('WIND.','obviously'); }
-  else if (r<0.58+extra*0.04) { game.events.push({type:'quake', t:4}); banner('EGGQUAKE.','structural damage'); }
-  else if (r<0.72+extra*0.03) { game.events.push({type:'flip', t:3}); banner('GRAVITY IS BROKEN.','thanks egg'); }
-  else if (r<0.84) { game.barrelRoll=1; banner('BARREL ROLL.','do a barrel roll'); }
-  else { game.rainbow=3; banner('RAINBOW MODE.','you caused this'); }
-}
-
-function killEgg() {
-  if (game.state!==STATE.PLAY) return;
-  game.state=STATE.DEAD;
-  const groundWY = game.camY + H*0.72;
-  egg.y = game.camY + H*0.30;
-  egg.vy = 560; egg.vr = 2.4*(Math.random()<.5?1:-1);
-  const dm=DEATH_MSGS[Math.floor(Math.random()*DEATH_MSGS.length)];
-  game.dead={t:0, pancake:false, card:false, groundY:groundWY, msg:dm[0], sub:dm[1]};
-  AU.whistleDown();
-  game.barrelRoll=1; game.flash=0.5; game.shake=20;
-  if (window.L) window.L('KILL ey='+(egg.y|0)+' cam='+(game.camY|0));
-  if (game.score>game.best) {
-    game.best=game.score;
-    localStorage.setItem('tewb_best', String(game.best));
-  }
-  checkUnlocks();
-}
-
-/* ---------------- INPUT ---------------- */
-let tapZones=[];
-
-function tapAction() {
-  AU.init();
-  if (game.state===STATE.TITLE) { startRun(); return; }
-  if (game.state===STATE.DEAD) {
-    if (game.unlockShow) { game.unlockShow=null; return; }
-    if (game.dead.t>0.7) startRun();
-    return;
-  }
-  if (game.state!==STATE.PLAY) return;
-
-  AU.tap();
-  const reverse = game.events.some(e=>e.type==='reverse');
-  const cur=egg.vx;
-  let desired = cur<=0 ? 1 : -1;   // flip current drift
-  if (Math.abs(cur)<20) {
-    // first / near-still tap: aim at the next pad instead of a coin flip
-    const np=nextPad();
-    const npX=np ? (np.move&&np.homeX?np.homeX:np.x) : W/2;
-    desired = npX>=egg.x ? 1 : -1;
-  }
-
-  // tier 6: the egg actively dodges the player
-  if (egg.tier>=6 && Math.random()<0.32) {
-    desired=-desired;
-    egg.smug=0.7;
-    if (egg.tier>=5){ egg.face='happy'; egg.faceT=0.45; }
-  } else {
-    egg.smug=0;
-    if (egg.tier>=5){ egg.face='focus'; egg.faceT=0.3; }
-  }
-  if (reverse) desired=-desired;
-  egg.vx=desired*(250+game.speedK*30);
-  egg.lookX=desired;
-  egg.lean += desired*0.2;          // banking kick, settles back to drift tilt
-  steerPuff(desired);
-  if (navigator.vibrate) navigator.vibrate(8);
-  if (window.L) window.L('tap -> vx='+egg.vx.toFixed(0)+' tier='+egg.tier);
-}
-
-function pointerDown(px,py) {
-  // title scene-switch zones first
-  for (const z of tapZones) {
-    if (px>=z.x&&px<=z.x+z.w&&py>=z.y&&py<=z.y+z.h) {
-      AU.init();
-      if (z.act==='prev') switchScene(-1);
-      else if (z.act==='next') switchScene(1);
-      else if (z.act==='mute') toggleMute();
-      else if (z.act==='egg') META.cycleSkin();
-      return;
-    }
-  }
-  tapAction();
-}
-function switchScene(d) {
-  game.scene=(game.scene+d+THEMES.length)%THEMES.length;
-  localStorage.setItem('tewb_scene', String(game.scene));
-}
-function toggleMute(){ AU.setMuted(!AU.muted); }
-
-canvas.addEventListener('pointerdown', e=>{
-  const r=canvas.getBoundingClientRect();
-  pointerDown(e.clientX-r.left, e.clientY-r.top);
-});
-window.addEventListener('keydown', e=>{
-  if (e.repeat) return;
-  if (e.code==='Space'||e.code==='Enter') { e.preventDefault(); tapAction(); }
-  if (game.state===STATE.TITLE && e.code==='ArrowLeft') switchScene(-1);
-  if (game.state===STATE.TITLE && e.code==='ArrowRight') switchScene(1);
-  if (e.code==='KeyM') toggleMute();
-});
-
-/* prevent scroll on mobile */
-document.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
-
-/* ============================================================
-   UPDATE
-   ============================================================ */
+/* ---------------- UPDATE ---------------- */
 function update(dt) {
-  game.time+=dt;
-  if (game.flash>0) game.flash-=dt*2.2;
-  if (game.shake>0) game.shake=Math.max(0,game.shake-dt*42);
-  game.zoom+=(1-game.zoom)*Math.min(1,dt*7);
-  if (game.banner) { game.banner.t+=dt; if(game.banner.t>game.banner.dur) game.banner=null; }
-  if (game.barrelRoll>0) game.barrelRoll-=dt*0.6;
-  if (game.rainbow>0) { game.rainbow-=dt; game.rainbowHue+=dt*200; }
-  if (game.comboT>0) { game.comboT-=dt; if(game.comboT<=0) game.combo=0; }
-  if (game.thoughtT>0) game.thoughtT-=dt;
+  if (game.state !== STATE.PLAY) return;
+  game.time += dt;
+  game.speedK = 1 + game.time*0.025;
+  game.spawnInt = Math.max(0.45, 1.1 - game.time*0.012);
 
-  // ambient spawn
-  if (Math.random()<0.12) ambient();
+  // player
+  const dx = player.tx - player.x;
+  player.vx = dx * 14;
+  player.x += player.vx * dt;
+  player.squash += (0 - player.squash) * Math.min(1, dt*8);
+  player.faceT -= dt;
+  if (player.faceT <= 0) player.face = 'happy';
+
+  // spawn
+  game.spawnT += dt;
+  if (game.spawnT >= game.spawnInt) {
+    game.spawnT = 0;
+    spawnItem();
+  }
+
+  // items
+  for (let i=game.items.length-1; i>=0; i--) {
+    const it = game.items[i];
+    it.y += it.vy * game.speedK * dt;
+    it.x += it.vx * dt;
+    it.rot += it.vr * dt;
+    if (it.x < it.r) { it.x=it.r; it.vx=Math.abs(it.vx); }
+    if (it.x > W-it.r) { it.x=W-it.r; it.vx=-Math.abs(it.vx); }
+
+    // collision with player (catch zone: top of egg)
+    const catchY = player.y - player.ry*0.6;
+    const dx2 = it.x - player.x;
+    const dy2 = it.y - catchY;
+    if (Math.abs(dx2) < player.rx*0.9 + it.r*0.3 && it.y > catchY - it.r && it.y < catchY + player.ry*0.5) {
+      it.caught = true;
+      handleCatch(it);
+      game.items.splice(i,1);
+      continue;
+    }
+    // missed / fell off
+    if (it.y > H + 50) {
+      if (it.type==='egg' || it.type==='gold') {
+        game.combo = 0;
+        game.comboT = 0;
+      }
+      game.items.splice(i,1);
+    }
+  }
 
   // particles
-  for (let i=parts.length-1;i>=0;i--){
-    const p=parts[i];
-    p.life+=dt;
-    if (p.life>p.max) { parts.splice(i,1); continue; }
-    if (!p.ambient) { p.vy+=900*dt; }
-    p.x+=p.vx*dt; p.y+=p.vy*dt; p.rot+=p.vr*dt;
+  for (let i=game.parts.length-1;i>=0;i--) {
+    const p = game.parts[i];
+    p.life += dt;
+    if (p.life >= p.max) { game.parts.splice(i,1); continue; }
+    p.vy += p.gravity * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.rot += p.vr * dt;
   }
-  for (let i=waves.length-1;i>=0;i--){
-    const w=waves[i]; w.t+=dt;
-    w.r+=(w.max-w.r)*Math.min(1,dt*10);
-    if (w.t>0.55) waves.splice(i,1);
-  }
-
-  if (game.state===STATE.TITLE) { updateTitle(dt); return; }
-  if (game.state===STATE.DEAD) { updateDead(dt); return; }
-  if (game.state===STATE.REVEAL) { updateReveal(dt); return; }
-
-  /* ---- PLAY ---- */
-  for (let i=game.events.length-1;i>=0;i--){
-    game.events[i].t-=dt;
-    if (game.events[i].t<=0) game.events.splice(i,1);
-  }
-  AU.tension = egg.crack/100;
-
-  let sdt=dt;
-  if (game.hitStop>0) { game.hitStop-=dt; sdt*=0.12; }
-
-  const quake=game.events.find(e=>e.type==='quake');
-  if (quake) game.shake=Math.max(game.shake, 9*Math.abs(Math.sin(game.time*22)));
-  const flip=game.events.find(e=>e.type==='flip');
-  const g=gravityG()*(flip?-1:1);
-  egg.vy+=g*sdt;
-  const wind=game.events.find(e=>e.type==='wind');
-  if (wind) egg.vx+=wind.dir*260*sdt;
-  egg.vx*=Math.pow(0.995,sdt*60);
-  egg.x+=egg.vx*sdt;
-  egg.y+=egg.vy*sdt;
-
-  // walls
-  if (egg.x<EGG_RX){ egg.x=EGG_RX; if (egg.vx<0) wallBump(-1); egg.vx=Math.abs(egg.vx)*0.7; }
-  if (egg.x>W-EGG_RX){ egg.x=W-EGG_RX; if (egg.vx>0) wallBump(1); egg.vx=-Math.abs(egg.vx)*0.7; }
-
-  // rotation
-  egg.rot+=egg.vr*sdt;
-  if (egg.tier===1) egg.rot*=Math.pow(0.9,sdt*10);
-
-  // banking: gentle tilt with drift, plus kick on steering taps
-  const leanTarget=Math.max(-1,Math.min(1,egg.vx/260))*0.1;
-  egg.lean+=(leanTarget-egg.lean)*Math.min(1,sdt*8);
-  // motion trail during fast sideways dashes
-  egg.trailT-=sdt;
-  if (Math.abs(egg.vx)>230 && egg.trailT<=0) {
-    egg.trailT=0.05;
-    const d=egg.vx>0?1:-1;
-    parts.push({x:egg.x-d*EGG_RX*0.8,y:egg.y+(Math.random()-0.5)*EGG_RX,
-      vx:-d*40,vy:(Math.random()-0.5)*30,life:0,max:0.3,
-      sz:2+Math.random()*2,rot:0,vr:0,c:'rgba(255,255,255,.85)',kind:'dot',ambient:false});
+  // puffs
+  for (let i=game.puffs.length-1;i>=0;i--) {
+    const p = game.puffs[i];
+    p.life += dt;
+    if (p.life >= p.max) { game.puffs.splice(i,1); continue; }
+    p.r = 4 + (p.maxR-4) * (p.life/p.max);
   }
 
-  // squash spring
-  const k=150, c=13;
-  egg.svx+=( (1-egg.sx)*k - egg.svx*c)*sdt;
-  egg.svy+=( (1-egg.sy)*k - egg.svy*c)*sdt;
-  egg.sx+=egg.svx*sdt; egg.sy+=egg.svy*sdt;
-  // breathing when calm
-  if (egg.tier<5 && Math.abs(egg.vy)<80) {
-    egg.sy=1+Math.sin(game.time*2.2)*0.018; egg.sx=1-Math.sin(game.time*2.2)*0.018;
+  // combo timer
+  if (game.combo > 0) {
+    game.comboT -= dt;
+    if (game.comboT <= 0) game.combo = 0;
   }
-
-  // blinking / face timers / look
-  egg.nextBlink-=sdt;
-  if (egg.nextBlink<=0){ egg.blink=0.16; egg.nextBlink=1.6+Math.random()*2.6; }
-  if (egg.blink>0) egg.blink-=sdt;
-  if (egg.faceT>0){ egg.faceT-=sdt; if(egg.faceT<=0) egg.face=egg.crack>60?'panic':'idle'; }
-  if (egg.crack>60&&egg.face!=='panic'&&egg.face!=='wow') egg.face='panic';
-  if (egg.smug>0) egg.smug-=sdt;
-  const targetLookX=Math.max(-1,Math.min(1,egg.vx/260));
-  egg.lookX+=(targetLookX-egg.lookX)*Math.min(1,sdt*8);
-  egg.lookY+=((egg.vy>0?0.4:-0.5)-egg.lookY)*Math.min(1,sdt*6);
-
-  // pads
-  for (const pad of pads) {
-    if (pad.press>0) pad.press=Math.max(0,pad.press-sdt*3.4);
-    pad.wob+=sdt*3;
-    if (pad.move) {
-      if (!pad.homeX) pad.homeX=pad.x;
-      pad.x=pad.homeX+Math.sin(game.time*1.4+pad.seed)*pad.move;
-    }
-  }
-
-  // collision: falling only
-  if (egg.vy>0) {
-    const bottom=egg.y+EGG_RY*egg.sy;
-    const prev=bottom-egg.vy*sdt;
-    for (const pad of pads) {
-      const top=pad.y-16;
-      if (prev<=top && bottom>=top &&
-          Math.abs(egg.x-pad.x)<pad.hw+EGG_RX*0.55) {
-        egg.y=top-EGG_RY*egg.sy+1;
-        doBounce(pad);
-        break;
-      }
-    }
-  }
-
-  // generate / cull pads
-  let lastY=0;
-  for (const p of pads) if (p.y>lastY) lastY=p.y;
-  while (lastY < game.camY+H+500) { lastY+=padGap(); pads.push(makePad(lastY)); }
-  for (let i=pads.length-1;i>=0;i--) if (pads[i].y<game.camY-220) pads.splice(i,1);
-
-  // camera
-  const target=egg.y-H*0.38;
-  game.camY+=(target-game.camY)*Math.min(1,sdt*5);
-
-  // miss
-  if (egg.y>game.camY+H+110) killEgg();
+  // shake/flash decay
+  game.shake *= Math.pow(0.001, dt);
+  game.flash = Math.max(0, game.flash - dt*2);
 }
 
-function updateTitle(dt) {
-  resetEgg();
-  egg.y=H*0.42+Math.sin(game.time*2.4)*10;
-  egg.sy=1+Math.sin(game.time*2.4)*0.04;
-  egg.sx=1-Math.sin(game.time*2.4)*0.04;
-}
-
-function updateReveal(dt) {
-  // squash settle
-  egg.svx+=( (1-egg.sx)*150 - egg.svx*13)*dt;
-  egg.svy+=( (1-egg.sy)*150 - egg.svy*13)*dt;
-  egg.sx+=egg.svx*dt; egg.sy+=egg.svy*dt;
-  egg.rot*=Math.pow(0.9,dt*8);
-
-  const rv=game.rv;
-  rv.t+=dt;
-  const t=rv.t;
-
-  // stay anchored in the world: tiny rise, then gentle float bob
-  egg.y+=egg.vy*dt;
-  egg.vy*=Math.pow(0.05,dt);
-  if (t>0.6) egg.y+=Math.sin((t-0.6)*2.4)*0.5;
-
-  const target=egg.y-H*0.36;
-  game.camY+=(target-game.camY)*Math.min(1,dt*4);
-
-  if (t>0.35&&rv.phase===0){ rv.phase=1; AU.hardMute(true); }
-  if (t>1.9&&!rv.ducked){ rv.ducked=true; AU.hardMute(false); AU.duckWah(); AU.absurdHonk(); }
-  if (t>2.85&&!rv.yoinked){ rv.yoinked=true; AU.yoink(); game.barrelRoll=0.7; }
-  if (t>3.25&&!rv.closed){ rv.closed=true; AU.plok(); game.flash=0.6; game.shake=14; }
-  if (t>4.05) finishReveal();
-}
-
-function updateDead(dt) {
-  const d=game.dead;
-  d.t+=dt;
-  if (!d.pancake) {
-    egg.vy+=2400*dt; egg.y+=egg.vy*dt; egg.rot+=egg.vr*dt;
-    if (egg.y>=d.groundY){
-      egg.y=d.groundY; d.pancake=true;
-      AU.splat(); game.shake=16; game.flash=0.4;
-      egg.sy=0.16; egg.sx=1.95; egg.svx=0; egg.svy=0;
-      burst(egg.x,d.groundY,true);
-    }
-  } else if (!d.card&&d.t>0.7) { d.card=true; }
-
-  // auto-open queued unlock celebrations over the death card
-  if (d.pancake && !game.unlockShow && game.unlockQueue.length) {
-    game.unlockShow={id:game.unlockQueue.shift(), t:0, launched:false};
-  }
-  if (game.unlockShow) {
-    const u=game.unlockShow;
-    u.t+=dt;
-    if (!u.launched) {
-      u.launched=true;
-      AU.unlockFanfare();
-      goldBurst(W/2, d.groundY-160);
-    }
-  }
-  // spring wobble of pancake
-  if (d.pancake) {
-    egg.svx+=( (1.9-egg.sx)*90 - egg.svx*10)*dt;
-    egg.svy+=( (0.18-egg.sy)*90 - egg.svy*10)*dt;
-    egg.sx+=egg.svx*dt; egg.sy+=egg.svy*dt;
+function handleCatch(it) {
+  const cx = it.x, cy = it.y;
+  if (it.type==='bomb') {
+    game.lives--;
+    game.combo = 0;
+    game.comboT = 0;
+    game.shake = 12;
+    game.flash = 0.5;
+    AU.boom();
+    if (navigator.vibrate) navigator.vibrate(30);
+    addPart(cx, cy, 18, COL.bomb, {sp:220, up:60, max:0.6, sz:3});
+    addPart(cx, cy, 8, '#FF8C42', {sp:160, up:80, max:0.5, sz:4});
+    player.face = 'ouch'; player.faceT = 0.6;
+    player.squash = -0.15;
+    if (game.lives <= 0) gameOver();
+  } else if (it.type==='heart') {
+    game.lives = Math.min(5, game.lives+1);
+    AU.heart();
+    addPart(cx, cy, 14, COL.heart, {sp:160, up:40, max:0.7, sz:3, kind:'heart'});
+    addPuff(cx, cy, COL.heart);
+    player.face = 'love'; player.faceT = 0.8;
+  } else if (it.type==='gold') {
+    const pts = 5 + Math.floor(game.combo*0.5);
+    game.score += pts;
+    game.combo++;
+    game.comboT = 2.2;
+    AU.gold();
+    addPart(cx, cy, 20, COL.gold, {sp:200, up:50, max:0.7, sz:3, kind:'star'});
+    addPart(cx, cy, 10, '#FFF', {sp:140, up:40, max:0.5, sz:2});
+    addPuff(cx, cy, COL.gold);
+    player.squash = 0.18;
+    player.face = 'wow'; player.faceT = 0.5;
+    if (navigator.vibrate) navigator.vibrate(12);
+  } else { // egg
+    const perfect = Math.abs(it.x - player.x) < player.rx*0.4;
+    const pts = (perfect ? 2 : 1) * (1 + Math.floor(game.combo*0.3));
+    game.score += pts;
+    game.combo++;
+    game.comboT = 2.0;
+    AU.catch(perfect);
+    addPart(cx, cy, perfect?12:7, perfect?COL.gold:COL.soft, {sp:160, up:50, max:0.5, sz:2.5});
+    if (perfect) addPuff(cx, cy, COL.gold);
+    player.squash = perfect?0.14:0.08;
+    player.face = perfect?'wow':'happy'; player.faceT = 0.35;
+    if (navigator.vibrate) navigator.vibrate(6);
   }
 }
 
-/* ============================================================
-   DRAW
-   ============================================================ */
-function roundRect(c,x,y,w,h,r){
-  c.beginPath();
-  c.moveTo(x+r,y);
-  c.arcTo(x+w,y,x+w,y+h,r);
-  c.arcTo(x+w,y+h,x,y+h,r);
-  c.arcTo(x,y+h,x,y,r);
-  c.arcTo(x,y,x+w,y,r);
-  c.closePath();
-}
-
-function drawBackground() {
-  const th=THEMES[game.scene];
-  const g=ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,th.bg); g.addColorStop(1,th.bgDark);
-  // expand fill to cover corners when rotated (barrel roll)
-  const diag=Math.ceil(Math.sqrt(W*W+H*H));
-  ctx.fillStyle=g; ctx.fillRect(-diag/2,-diag/2,W+diag,H+diag);
-
-  // scene decor (parallax on camera)
-  const par=game.camY*0.25;
-  ctx.save();
-  if (th.pType==='spark') {
-    // big soft sun
-    ctx.globalAlpha=0.5;
-    ctx.fillStyle='#FFE29A';
-    ctx.beginPath(); ctx.arc(W*0.78,(H*0.18 - par*0.2)%(H+300)-150,90,0,7); ctx.fill();
-    ctx.globalAlpha=0.25;
-    ctx.beginPath(); ctx.arc(W*0.78,H*0.18,130,0,7); ctx.fill();
-  } else if (th.pType==='heart') {
-    ctx.globalAlpha=0.35; ctx.fillStyle='#FFFFFF';
-    [[W*0.2,H*0.22,70],[W*0.85,H*0.7,100],[W*0.15,H*0.85,50]].forEach(c=>{
-      ctx.beginPath(); ctx.arc(c[0],c[1],c[2],0,7); ctx.fill();
-    });
-  } else if (th.pType==='star') {
-    ctx.globalAlpha=0.9; ctx.fillStyle='#F4EFD0';
-    ctx.beginPath(); ctx.arc(W*0.75,H*0.16,42,0,7); ctx.fill();
-    ctx.fillStyle=th.bg; ctx.globalAlpha=0.55;
-    ctx.beginPath(); ctx.arc(W*0.75-14,H*0.16-8,38,0,7); ctx.fill();
-  } else if (th.pType==='leaf') {
-    ctx.globalAlpha=0.25; ctx.strokeStyle=th.padB; ctx.lineWidth=14; ctx.lineCap='round';
-    for (let i=0;i<4;i++){
-      const x=W*(0.15+i*0.24);
-      ctx.beginPath(); ctx.moveTo(x,-40-par*0.15%400); ctx.lineTo(x-10,H+40); ctx.stroke();
-    }
-  } else if (th.pType==='neon') {
-    // perspective grid
-    ctx.globalAlpha=0.3; ctx.strokeStyle=th.padB; ctx.lineWidth=1.5;
-    const off=(par%46);
-    for (let y=off;y<H;y+=46){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
-    for (let x=0;x<=W;x+=W/4){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
-  }
-  ctx.restore();
-}
-
-function drawParticles(ambientOnly) {
-  for (const p of parts) {
-    if (!!p.ambient!==ambientOnly) continue;
-    const a=ambientOnly ? 0.55*(1-p.life/p.max) : (1-p.life/p.max);
-    ctx.globalAlpha=Math.max(0,a);
-    ctx.fillStyle=p.c; ctx.strokeStyle=p.c;
-    drawParticleShape(p);
-  }
-  ctx.globalAlpha=1;
-}
-function drawParticleShape(p){
-  ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
-  if (p.kind==='heart') {
-    const s=p.sz*0.05;
-    ctx.beginPath();
-    ctx.moveTo(0,p.sz*0.9);
-    ctx.bezierCurveTo(-p.sz*1.6,-p.sz*0.3,-p.sz*0.7,-p.sz*1.3,0,-p.sz*0.3);
-    ctx.bezierCurveTo(p.sz*0.7,-p.sz*1.3,p.sz*1.6,-p.sz*0.3,0,p.sz*0.9);
-    ctx.fill();
-  } else if (p.kind==='star') {
-    if (p.ambient) { ctx.globalAlpha*= (0.5+0.5*Math.sin(p.life*6+p.tw)); }
-    drawStar(0,0,p.sz,p.sz*0.45,4);
-  } else if (p.kind==='leaf') {
-    ctx.beginPath();
-    ctx.ellipse(0,0,p.sz,p.sz*0.45,0,0,7); ctx.fill();
-  } else if (p.kind==='neon') {
-    ctx.shadowColor=p.c; ctx.shadowBlur=10;
-    ctx.fillRect(-p.sz/2,-p.sz/2,p.sz,p.sz);
-  } else if (p.kind==='text') {
-    ctx.font='900 20px system-ui, Arial';
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.5)';
-    ctx.strokeText(p.text,0,0);
-    ctx.fillText(p.text,0,0);
-  } else {
-    ctx.beginPath(); ctx.arc(0,0,p.sz,0,7); ctx.fill();
-  }
-  ctx.restore();
-}
-function drawStar(x,y,out,inn,points){
-  ctx.beginPath();
-  for (let i=0;i<points*2;i++){
-    const r=i%2?inn:out, a=i/(points*2)*Math.PI*2-Math.PI/2;
-    const px=x+Math.cos(a)*r, py=y+Math.sin(a)*r;
-    i?ctx.lineTo(px,py):ctx.moveTo(px,py);
-  }
-  ctx.closePath(); ctx.fill();
-}
-
-/* pads */
-/* world-space landing hint on the next pad */
-function drawAimGuide() {
-  const L = predictLanding();
-  if (!L) return;
-  const pulse = 0.62+0.38*Math.sin(game.time*7);
-  const y = L.pad.y-22;
-  ctx.save();
-  if (L.on) {
-    ctx.globalAlpha=0.9*pulse;
-    ctx.strokeStyle='#FFD93D'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.arc(L.x,y,7,0,7); ctx.stroke();
-    ctx.fillStyle='#FFE88A';
-    ctx.beginPath(); ctx.arc(L.x,y,2.6,0,7); ctx.fill();
-    ctx.globalAlpha=0.45*pulse; ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.moveTo(L.x-5,y-12); ctx.lineTo(L.x,y-8); ctx.lineTo(L.x+5,y-12);
-    ctx.stroke();
-  } else {
-    ctx.globalAlpha=0.5*pulse;
-    ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(L.x,y,6,0,7); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(L.x-4,y-4); ctx.lineTo(L.x+4,y+4);
-    ctx.moveTo(L.x+4,y-4); ctx.lineTo(L.x-4,y+4);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawPad(pad) {
-  const th=THEMES[game.scene];
-  const pr=pad.press;
-  ctx.save();
-  ctx.translate(pad.x,pad.y);
-
-  // shadow
-  ctx.globalAlpha=0.18; ctx.fillStyle='#000';
-  ctx.beginPath(); ctx.ellipse(0,18,pad.hw,12,0,0,7); ctx.fill();
-  ctx.globalAlpha=1;
-
-  const squashY=1-pr*0.35, squashX=1+pr*0.18;
-  ctx.scale(squashX,squashY);
-
-  if (pad.type==='pillow') {
-    const g=ctx.createLinearGradient(0,-20,0,18);
-    g.addColorStop(0,th.padA); g.addColorStop(1,th.padB);
-    ctx.fillStyle=g;
-    roundRect(ctx,-pad.hw,-18,pad.hw*2,34,17); ctx.fill();
-    ctx.strokeStyle='rgba(0,0,0,.12)'; ctx.lineWidth=2; ctx.stroke();
-    // seam
-    ctx.beginPath(); ctx.moveTo(-pad.hw+10,0);
-    ctx.quadraticCurveTo(0,6,pad.hw-10,0);
-    ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=2.5; ctx.stroke();
-    // tufts
-    ctx.fillStyle=th.padC;
-    [-pad.hw+14,pad.hw-14].forEach(x=>{ ctx.beginPath(); ctx.arc(x,0,3,0,7); ctx.fill(); });
-  }
-  else if (pad.type==='jelly') {
-    const wob=Math.sin(pad.wob)*2;
-    const g=ctx.createLinearGradient(0,-26,0,16);
-    g.addColorStop(0,th.padA); g.addColorStop(1,th.padB);
-    ctx.fillStyle=g;
-    ctx.beginPath();
-    ctx.moveTo(-pad.hw,14);
-    ctx.quadraticCurveTo(-pad.hw,-26+wob,0,-26-wob);
-    ctx.quadraticCurveTo(pad.hw,-26+wob,pad.hw,14);
-    ctx.quadraticCurveTo(0,22,-pad.hw,14);
-    ctx.fill();
-    ctx.globalAlpha=0.5; ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.ellipse(-pad.hw*0.4,-12,pad.hw*0.22,6,-0.4,0,7); ctx.fill();
-    ctx.globalAlpha=1;
-  }
-  else { // trampoline
-    ctx.strokeStyle=th.padB; ctx.lineWidth=5; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(-pad.hw,-6); ctx.lineTo(-pad.hw*0.7,16); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(pad.hw,-6); ctx.lineTo(pad.hw*0.7,16); ctx.stroke();
-    const g=ctx.createLinearGradient(0,-14,0,6);
-    g.addColorStop(0,th.padA); g.addColorStop(1,th.padC);
-    ctx.fillStyle=g;
-    ctx.beginPath();
-    ctx.moveTo(-pad.hw,-4);
-    ctx.quadraticCurveTo(0,12+pr*8,pad.hw,-4);
-    ctx.lineTo(pad.hw,-12);
-    ctx.quadraticCurveTo(0,2,-pad.hw,-12);
-    ctx.closePath(); ctx.fill();
-  }
-  ctx.restore();
-}
-
-/* egg shape path in local space */
-function eggPath() {
-  ctx.beginPath();
-  ctx.moveTo(0,-EGG_RY);
-  ctx.bezierCurveTo(EGG_RX*0.95,-EGG_RY*0.85, EGG_RX*1.05,EGG_RY*0.35, 0,EGG_RY);
-  ctx.bezierCurveTo(-EGG_RX*1.05,EGG_RY*0.35, -EGG_RX*0.95,-EGG_RY*0.85, 0,-EGG_RY);
-  ctx.closePath();
-}
-
-function drawCracks() {
-  const sc=shellColors();
-  ctx.save();
-  eggPath(); ctx.clip();
-  ctx.lineCap='round'; ctx.lineJoin='round';
-  for (const c of egg.cracks) {
-    c.p=Math.min(1,c.p+0.08);
-    const n=Math.max(2,Math.floor(c.pts.length*c.p));
-    ctx.beginPath();
-    ctx.moveTo(c.pts[0][0],c.pts[0][1]);
-    for (let i=1;i<n;i++) ctx.lineTo(c.pts[i][0],c.pts[i][1]);
-    if (n<c.pts.length){
-      const a=c.pts[n-1],b=c.pts[n], f=(c.p*c.pts.length)%1;
-      ctx.lineTo(a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f);
-    }
-    ctx.globalAlpha=c.fade?0.3:0.8;
-    ctx.strokeStyle=sc.dark?'rgba(255,238,180,.95)':'rgba(86,58,40,.9)'; ctx.lineWidth=c.w; ctx.stroke();
-    ctx.globalAlpha=c.fade?0.3:0.5;
-    ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=0.8;
-    ctx.stroke();
-  }
-  ctx.restore();
-  ctx.globalAlpha=1;
-}
-
-function drawFace() {
-  if (egg.tier<5) return;
-  const ex=egg.face;
-  const blinking=egg.blink>0;
-  const sc=shellColors();
-  const ink = sc.dark ? '#EFE4FF' : '#3A2A20';      // eyes/brows
-  const lip = sc.dark ? '#E9C9B8' : '#8A4A30';      // mouth line
-  const cavity = sc.dark ? '#FFB86B' : '#6E3524';   // open-mouth fill
-  ctx.save();
-  // eyes
-  const eyes=[-15,15];
-  for (const ex0 of eyes) {
-    if (ex==='dead' || (game.state===STATE.DEAD)) {
-      ctx.strokeStyle=ink; ctx.lineWidth=3; ctx.lineCap='round';
-      ctx.beginPath();
-      ctx.moveTo(ex0-6,-20); ctx.lineTo(ex0+6,-8);
-      ctx.moveTo(ex0+6,-20); ctx.lineTo(ex0-6,-8); ctx.stroke();
-      continue;
-    }
-    if (blinking || ex==='happy' && egg.tier>=5) {
-      if (ex==='happy'){
-        ctx.strokeStyle=ink; ctx.lineWidth=3; ctx.lineCap='round';
-        ctx.beginPath(); ctx.arc(ex0,-13,6,Math.PI*0.15,Math.PI*0.85,true); ctx.stroke();
-      } else {
-        ctx.strokeStyle=ink; ctx.lineWidth=2.5;
-        ctx.beginPath(); ctx.moveTo(ex0-6,-14); ctx.lineTo(ex0+6,-14); ctx.stroke();
-      }
-      continue;
-    }
-    // white
-    ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.ellipse(ex0,-14,7.5,8.5,0,0,7); ctx.fill();
-    // pupil
-    let px=ex0+egg.lookX*3.2, py=-13+egg.lookY*3;
-    let pr=3.4;
-    if (ex==='shock'){ px=ex0; pr=2.2; }
-    if (ex==='wow'){ pr=4.4; }
-    if (ex==='panic'){ px=ex0+Math.sin(game.time*40+ex0)*1.5; }
-    ctx.fillStyle='#241A12';
-    ctx.beginPath(); ctx.arc(px,py,pr,0,7); ctx.fill();
-    ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.arc(px-1,py-1.2,1.1,0,7); ctx.fill();
-  }
-  // brows
-  ctx.strokeStyle=ink; ctx.lineWidth=2.5; ctx.lineCap='round';
-  if (ex==='focus'||ex==='shock'){
-    ctx.beginPath(); ctx.moveTo(-22,-26); ctx.lineTo(-9,-24); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(22,-26); ctx.lineTo(9,-24); ctx.stroke();
-  }
-  if (egg.smug>0){
-    ctx.beginPath(); ctx.moveTo(-22,-25); ctx.lineTo(-9,-27); ctx.stroke();
-  }
-  // mouth
-  ctx.strokeStyle=lip; ctx.fillStyle=lip; ctx.lineWidth=2.4;
-  ctx.beginPath();
-  if (ex==='wow'||ex==='shock'){
-    ctx.fillStyle=cavity;
-    ctx.beginPath(); ctx.ellipse(0,5, ex==='shock'?3:5, ex==='shock'?4:7,0,0,7); ctx.fill();
-  } else if (ex==='panic'){
-    ctx.moveTo(-7,5);
-    for (let i=0;i<4;i++) ctx.lineTo(-7+i*4.6,5+(i%2?3:0));
-    ctx.stroke();
-  } else if (ex==='happy'){
-    ctx.arc(0,0,9,0.2,Math.PI-0.2); ctx.stroke();
-  } else if (egg.smug>0){
-    ctx.moveTo(-5,5); ctx.quadraticCurveTo(3,8,8,2); ctx.stroke();
-  } else {
-    ctx.arc(0,3,4,0.3,Math.PI-0.3); ctx.stroke();
-  }
-  // blush
-  if (ex==='happy'||egg.smug>0){
-    ctx.fillStyle='rgba(255,120,120,.45)';
-    ctx.beginPath(); ctx.ellipse(-20,-4,4.5,3,0,0,7); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(20,-4,4.5,3,0,0,7); ctx.fill();
-  }
-  // sweat
-  if (ex==='panic'){
-    ctx.fillStyle='#9ED8FF';
-    ctx.beginPath(); ctx.moveTo(24,-28); ctx.quadraticCurveTo(28,-20,24,-18); ctx.quadraticCurveTo(20,-20,24,-28); ctx.fill();
-    // extra sweat droplets flying
-    const sp=Math.sin(game.time*22)*0.5+0.5;
-    ctx.beginPath(); ctx.moveTo(-26,-32); ctx.quadraticCurveTo(-30,-24,-26,-22); ctx.quadraticCurveTo(-22,-24,-26,-32); ctx.fill();
-    if (sp>0.4){ ctx.beginPath(); ctx.arc(-28,-36,2.5,0,7); ctx.fill(); }
-  }
-  ctx.restore();
-}
-
-function drawEggShellOnly() {
-  const sc=shellColors();
-  const g=ctx.createLinearGradient(-EGG_RX,-EGG_RY,EGG_RX,EGG_RY);
-  g.addColorStop(0,sc.egg); g.addColorStop(1,sc.shade);
-  ctx.fillStyle=g; eggPath(); ctx.fill();
-  // glossy top-left
-  ctx.save(); eggPath(); ctx.clip();
-  ctx.globalAlpha=sc.id===1?0.65:0.5; ctx.fillStyle='#fff';
-  ctx.beginPath(); ctx.ellipse(-16,-24,12,18,-0.4,0,7); ctx.fill();
-  ctx.globalAlpha=1;
-  drawSkinAccent(sc, true);
-  ctx.restore();
-  drawSkinAccent(sc, false);
-}
-
-/* per-skin flourishes. inside=true draws within the shell clip,
-   inside=false draws parts that intentionally extend beyond it. */
-function drawSkinAccent(sc, inside) {
-  const tw=0.65+0.35*Math.sin(game.time*5);
-  if (sc.id===1) {                 /* GOLDEN: sparkle stars */
-    if (inside) {
-      ctx.globalAlpha=tw; ctx.fillStyle='#FFFDE0';
-      [[-20,-28,4.5],[18,8,3.5],[4,30,3],[24,-32,2.6]].forEach(s=>drawStar(s[0],s[1],s[2],s[2]*0.42,4));
-      ctx.globalAlpha=1;
-    }
-  } else if (sc.id===2) {          /* DEVIL: horns + tail */
-    if (!inside) {
-      ctx.fillStyle=sc.shade;
-      ctx.beginPath();
-      ctx.moveTo(-24,-EGG_RY+8); ctx.lineTo(-30,-EGG_RY-12); ctx.lineTo(-14,-EGG_RY+2);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(24,-EGG_RY+8); ctx.lineTo(30,-EGG_RY-12); ctx.lineTo(14,-EGG_RY+2);
-      ctx.closePath(); ctx.fill();
-      // tail
-      ctx.strokeStyle=sc.shade; ctx.lineWidth=4; ctx.lineCap='round';
-      ctx.beginPath(); ctx.moveTo(EGG_RX-6,EGG_RY-18);
-      ctx.quadraticCurveTo(EGG_RX+20,EGG_RY-4,EGG_RX+14,EGG_RY-26); ctx.stroke();
-      ctx.fillStyle=sc.shade;
-      ctx.beginPath(); ctx.moveTo(EGG_RX+14,EGG_RY-26);
-      ctx.lineTo(EGG_RX+22,EGG_RY-22); ctx.lineTo(EGG_RX+12,EGG_RY-18);
-      ctx.closePath(); ctx.fill();
-    }
-  } else if (sc.id===3) {          /* ROBOT: antenna / seam / rivets */
-    if (inside) {
-      ctx.strokeStyle='rgba(70,85,105,.6)'; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.moveTo(-30,-6); ctx.lineTo(30,-6); ctx.stroke();
-      ctx.fillStyle=sc.shade;
-      ctx.beginPath(); ctx.arc(-26,10,2.4,0,7); ctx.arc(26,10,2.4,0,7); ctx.fill();
-    } else {
-      ctx.strokeStyle=sc.shade; ctx.lineWidth=2.6; ctx.lineCap='round';
-      ctx.beginPath(); ctx.moveTo(0,-EGG_RY); ctx.lineTo(0,-EGG_RY-13); ctx.stroke();
-      ctx.fillStyle='#FF8A5C';
-      ctx.beginPath(); ctx.arc(0,-EGG_RY-15,3.4,0,7); ctx.fill();
-    }
-  } else if (sc.id===4) {          /* GALAXY: inner stars */
-    if (inside) {
-      ctx.fillStyle='#FFFDE8';
-      [[-22,-30,1.7,0],[16,-18,1.3,2],[24,12,1.6,4],[-14,16,1.2,1],[6,-2,1.5,3],[-26,26,1.3,5]]
-        .forEach(s=>{ ctx.globalAlpha=0.5+0.5*Math.sin(game.time*4+s[3]);
-          ctx.beginPath(); ctx.arc(s[0],s[1],s[2],0,7); ctx.fill(); });
-      ctx.globalAlpha=1;
-    }
-  }
-}
-
-/* chick reveal */
-function drawRevealScene() {
-  const rv=game.rv, t=rv.t;
-  const open = t<0.5 ? 0 : Math.min(1,(t-0.5)/0.5);
-  const emerge = t<1.0 ? 0 : Math.min(1,(t-1.0)/0.35);
-  const yoink = t>2.85 ? Math.max(0,1-(t-2.85)/0.4) : 1;
-  const close = t>3.2 ? Math.min(1,(t-3.2)/0.25) : 0;
-  const openEff=open*(1-close);
-
-  ctx.save();
-  ctx.translate(egg.x,egg.y);
-
-  // glow rays
-  if (openEff>0.1){
-    ctx.save(); ctx.globalAlpha=0.5*openEff;
-    ctx.strokeStyle=THEMES[game.scene].padC; ctx.lineWidth=4;
-    for (let i=0;i<10;i++){
-      const a=i/10*Math.PI*2;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a)*40,Math.sin(a)*50);
-      ctx.lineTo(Math.cos(a)*(120+Math.sin(game.time*4)*8),Math.sin(a)*(150));
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  // lower shell half
-  drawShellHalf(-1, openEff);
-  // upper shell half lifts
-  ctx.save();
-  ctx.translate(0,-30*openEff-10*yoink);
-  ctx.rotate(-0.5*openEff);
-  drawShellHalf(1, openEff);
-  ctx.restore();
-
-  // chick
-  const up=emerge*yoink*(1-close*0.9);
-  if (up>0.01){
-    ctx.save();
-    ctx.translate(0,-34*up);
-    ctx.scale(0.4+0.6*up,0.4+0.6*up);
-    drawChick(t);
-    ctx.restore();
-
-    // speech line above chick — clamp to screen edges
-    if (t>2.0&&t<3.2&&!close){
-      const lineA=Math.min(1,(t-2.0)/0.3)*Math.max(0,1-(t-3.0)/0.2);
-      ctx.save();
-      ctx.globalAlpha=lineA;
-      ctx.font='900 17px system-ui, Arial';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.4)';
-      const txt=('"'+rv.line+'"').toUpperCase();
-      const tw=ctx.measureText(txt).width;
-      const sx=Math.max(tw/2+8, Math.min(W-tw/2-8, egg.x));
-      ctx.strokeText(txt,sx-egg.x,-70);
-      ctx.fillStyle='#fff';
-      ctx.fillText(txt,sx-egg.x,-70);
-      ctx.restore();
-    }
-  }
-
-  // when closed draw full egg + fading cracks
-  if (close>0){
-    ctx.globalAlpha=close;
-    drawEggShellOnly();
-    ctx.globalAlpha=1;
-  }
-  ctx.restore();
-}
-
-function drawShellHalf(upper, open) {
-  const sc=shellColors();
-  ctx.save();
-  if (!upper) ctx.scale(1,-1);   // path is the top dome; flip it for the lower half
-  // half occupies -ry..0 along y (upper before flip)
-  ctx.beginPath();
-  ctx.moveTo(-EGG_RX,0);
-  // jagged rim
-  const teeth=6;
-  for (let i=0;i<=teeth;i++){
-    const x=-EGG_RX+(i/teeth)*EGG_RX*2;
-    const y=(i%2?-8:-1)*open;
-    ctx.lineTo(x,y);
-  }
-  ctx.lineTo(EGG_RX,0);
-  ctx.bezierCurveTo(EGG_RX*1.05,-EGG_RY*0.35, EGG_RX*0.95,-EGG_RY*0.85,0,-EGG_RY);
-  ctx.bezierCurveTo(-EGG_RX*0.95,-EGG_RY*0.85,-EGG_RX*1.05,-EGG_RY*0.35,-EGG_RX,0);
-  ctx.closePath();
-  const g=ctx.createLinearGradient(-EGG_RX,-EGG_RY,EGG_RX,0);
-  g.addColorStop(0,sc.egg); g.addColorStop(1,sc.shade);
-  ctx.fillStyle=g; ctx.fill();
-  ctx.strokeStyle=sc.dark?'rgba(220,210,255,.45)':'rgba(120,90,60,.5)'; ctx.lineWidth=1.5; ctx.stroke();
-  ctx.restore();
-}
-
-function drawChick(t) {
-  // body
-  ctx.fillStyle='#FFD93D';
-  ctx.beginPath(); ctx.ellipse(0,6,24,26,0,0,7); ctx.fill();
-  // belly
-  ctx.fillStyle='#FFEC99';
-  ctx.beginPath(); ctx.ellipse(0,12,14,15,0,0,7); ctx.fill();
-  // head is the body top; wings
-  ctx.fillStyle='#F2B900';
-  // left wing waves when emerged
-  const waving = t>2.0&&t<2.85;
-  const wave = waving ? Math.sin(t*16)*8 : 3;
-  const wingRotL = waving ? Math.sin(t*14)*0.6 : 0.4+wave*0.03;
-  ctx.save(); ctx.translate(-22,8); ctx.rotate(wingRotL);
-  ctx.beginPath(); ctx.ellipse(0,0,7,13,0,0,7); ctx.fill();
-  ctx.restore();
-  ctx.beginPath(); ctx.ellipse(22,8,7,13,-0.4,0,7); ctx.fill();
-  // beak
-  ctx.fillStyle='#FF7A1A';
-  const beakOpen=t>1.9&&t<2.8?3:0;
-  ctx.beginPath();
-  ctx.moveTo(-6,0); ctx.lineTo(6,0); ctx.lineTo(0,6+beakOpen); ctx.closePath(); ctx.fill();
-  ctx.fillStyle='#D85F0E';
-  ctx.beginPath();
-  ctx.moveTo(-6,1); ctx.lineTo(6,1); ctx.lineTo(0,-3); ctx.closePath(); ctx.fill();
-  // SUNGLASSES
-  ctx.fillStyle='#15131F';
-  roundRect(ctx,-18,-14,14,10,3); ctx.fill();
-  roundRect(ctx,4,-14,14,10,3); ctx.fill();
-  ctx.fillRect(-4,-11,8,3);
-  // shine
-  ctx.fillStyle='rgba(255,255,255,.75)';
-  ctx.fillRect(-15,-12,4,2.5); ctx.fillRect(7,-12,4,2.5);
-  ctx.fillStyle='rgba(255,255,255,.3)';
-  ctx.fillRect(-15,-9,8,1.4); ctx.fillRect(7,-9,8,1.4);
-  // animated glare sweep — a bright diagonal streak that slides across the lenses
-  const gl=(t*0.9)%3.2;                 // 0..3.2 loop, mostly dark
-  if (gl<1) {
-    const gx=-20+gl*44;                  // sweep x from -20 to +24
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(-18,-14,36,10); ctx.clip(); // clip to both lenses
-    ctx.translate(gx,-9); ctx.rotate(-0.5);
-    ctx.fillStyle='rgba(255,255,255,'+(0.65*Math.sin(gl*Math.PI)).toFixed(3)+')';
-    ctx.fillRect(-2.5,-8,5,16);
-    ctx.fillStyle='rgba(255,255,255,'+(0.3*Math.sin(gl*Math.PI)).toFixed(3)+')';
-    ctx.fillRect(3.5,-8,2,16);
-    ctx.restore();
-  }
-  // little feet
-  ctx.strokeStyle='#FF7A1A'; ctx.lineWidth=3; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(-8,30); ctx.lineTo(-8,35); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(8,30); ctx.lineTo(8,35); ctx.stroke();
-}
-
-/* the egg (play states) */
-function drawEgg() {
-  ctx.save();
-  ctx.translate(egg.x,egg.y);
-  ctx.rotate(egg.rot+egg.lean);
-  ctx.scale(egg.sx,egg.sy);
-  drawEggShellOnly();
-  drawCracks();
-  drawFace();
-  ctx.restore();
-}
-
-/* dead: pancake + chick with spatula */
-function drawDeadVisuals() {
-  const d=game.dead, th=THEMES[game.scene];
-  // ground strip
-  ctx.fillStyle=th.soft;
-  ctx.fillRect(0,d.groundY+10,W,H);
-  ctx.fillStyle=th.padC;
-  ctx.fillRect(0,d.groundY+8,W,4);
-
-  ctx.save();
-  ctx.translate(egg.x,egg.y);
-  ctx.rotate(egg.rot*0.2);
-  ctx.scale(egg.sx,egg.sy);
-  drawEggShellOnly();
-  drawCracks();
-  ctx.restore();
-
-  if (d.pancake){
-    // chick head poking out of the pancake, sunglasses crooked
-    ctx.save();
-    ctx.translate(egg.x+24,egg.y-14);
-    ctx.scale(1.25,1.25);
-    ctx.rotate(-0.25);
-    // head
-    ctx.fillStyle='#FFD93D';
-    ctx.beginPath(); ctx.arc(0,0,14,0,7); ctx.fill();
-    // shades
-    ctx.fillStyle='#15131F';
-    roundRect(ctx,-11,-6,9,7,2); ctx.fill();
-    roundRect(ctx,2,-6,9,7,2); ctx.fill();
-    ctx.fillRect(-2,-4,4,2);
-    ctx.fillStyle='rgba(255,255,255,.7)';
-    ctx.fillRect(-9,-5,3,1.6);
-    // beak
-    ctx.fillStyle='#FF7A1A';
-    ctx.beginPath(); ctx.moveTo(-3,3); ctx.lineTo(4,3); ctx.lineTo(0,8); ctx.fill();
-    // spatula
-    ctx.strokeStyle='#8A8F9E'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.moveTo(-14,6); ctx.lineTo(-26,16); ctx.stroke();
-    ctx.fillStyle='#AEB4C2';
-    roundRect(ctx,-31,13,9,6,2); ctx.fill();
-    ctx.restore();
-  }
-}
-
-/* shockwave rings (world space) */
-function drawWaves() {
-  for (const w of waves){
-    ctx.globalAlpha=(1-w.t/0.55)*0.6;
-    ctx.strokeStyle='#fff'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.ellipse(w.x,w.y,w.r,w.r*0.4,0,0,7); ctx.stroke();
-  }
-  ctx.globalAlpha=1;
-}
-
-/* HUD */
-function drawHUD() {
-  const th=THEMES[game.scene];
-  const dark = game.scene===2||game.scene===4;
-  ctx.fillStyle=dark?'rgba(255,255,255,.92)':'rgba(60,40,20,.85)';
-  ctx.font='800 15px system-ui, Arial';
-  ctx.textAlign='left'; ctx.textBaseline='top';
-  ctx.fillText('BOUNCES ' + egg.bounceN, 16, 14);
-
-  // crack bar
-  const bw=W*0.42, bx=(W-bw)/2, by=20;
-  ctx.fillStyle=dark?'rgba(255,255,255,.2)':'rgba(0,0,0,.14)';
-  roundRect(ctx,bx,by,bw,5,2.5); ctx.fill();
-  const danger=egg.crack>60;
-  ctx.fillStyle=danger?'#FF4D4D':th.padC;
-  // clamp the fill so the pulse never overflows
-  const cw=Math.min(bw, bw*egg.crack/100);
-  if (danger) { const p=1+Math.sin(game.time*12)*0.15; roundRect(ctx,bx,by,Math.min(bw,cw*p),5,2.5); }
-  else roundRect(ctx,bx,by,cw,5,2.5);
-  ctx.fill();
-
-  // milestone goal chip
-  const rem=Math.max(0, game.goal-egg.bounceN);
-  const goalLabel=(rem===1?'1 MORE':rem+' MORE')+' · GOAL '+game.goal;
-  ctx.font='800 11px system-ui, Arial';
-  const gw=ctx.measureText(goalLabel).width+18;
-  ctx.fillStyle='rgba(255,217,61,.95)';
-  roundRect(ctx,(W-gw)/2,31,gw,17,8.5); ctx.fill();
-  ctx.fillStyle='#5A4410';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(goalLabel,W/2,39.5);
-  ctx.textAlign='left'; ctx.textBaseline='top';
-
-  // mute icon
-  drawMuteIcon(W-40,14);
-}
-
-function drawMuteIcon(x,y){
-  const th=THEMES[game.scene];
-  const dark=game.scene===2||game.scene===4;
-  ctx.fillStyle=dark?'rgba(255,255,255,.85)':'rgba(60,40,20,.8)';
-  ctx.beginPath();
-  ctx.moveTo(x,y+3); ctx.lineTo(x+6,y+3); ctx.lineTo(x+12,y); ctx.lineTo(x+12,y+14); ctx.lineTo(x+6,y+11); ctx.lineTo(x,y+11);
-  ctx.closePath(); ctx.fill();
-  if (AU.muted){ ctx.strokeStyle=ctx.fillStyle; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(x+16,y+1); ctx.lineTo(x+24,y+13); ctx.stroke(); }
-}
-
-/* banner big text */
-function drawBanner() {
-  const b=game.banner; if(!b) return;
-  const a = b.t<0.18? b.t/0.18 : (b.t>b.dur-0.3? (b.dur-b.t)/0.3 : 1);
-  const pop = b.t<0.22 ? 0.6+1.15*(b.t/0.22)*(0.9+0.1*Math.sin(b.t*30)) : 1.05;
-  ctx.save();
-  ctx.globalAlpha=Math.max(0,Math.min(1,a));
-  ctx.translate(W/2,H*0.3);
-  ctx.scale(Math.min(1.15,pop),Math.min(1.15,pop));
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  // auto-scale to fit width
-  let fs=34;
-  ctx.font='900 '+fs+'px system-ui, Arial';
-  const tw=ctx.measureText(b.text).width;
-  if (tw>W*0.86) { fs=Math.floor(34*W*0.86/tw); ctx.font='900 '+fs+'px system-ui, Arial'; }
-  ctx.lineWidth=Math.max(3,fs*0.18); ctx.strokeStyle='rgba(0,0,0,.25)';
-  ctx.strokeText(b.text,0,0);
-  ctx.fillStyle='#fff';
-  ctx.fillText(b.text,0,0);
-  if (b.sub){
-    ctx.font='700 '+Math.max(10,Math.floor(fs*0.41))+'px system-ui, Arial';
-    ctx.fillText(b.sub.toUpperCase(),0,fs*0.88);
-  }
-  ctx.restore();
-}
-
-/* TITLE SCREEN */
-function drawTitle() {
-  const th=THEMES[game.scene];
-  // egg visual (plain, no face — tease)
-  ctx.save();
-  ctx.translate(W/2,egg.y);
-  ctx.scale(egg.sx,egg.sy);
-  drawEggShellOnly();
-  // tiny sunglasses peeking behind bottom corner
-  const tsc=shellColors();
-  ctx.fillStyle=tsc.dark?'#EFE4FF':'#15131F';
-  roundRect(ctx,-24,40,16,7,2); ctx.fill();
-  roundRect(ctx,-4,40,16,7,2); ctx.fill();
-  ctx.fillRect(-8,42,5,2);
-  ctx.fillStyle='rgba(255,255,255,.7)'; ctx.fillRect(-21,41,4,1.6);
-  ctx.restore();
-
-  // texts
-  ctx.textAlign='center';
-  ctx.fillStyle=th.ink;
-  ctx.font='800 12px system-ui, Arial';
-  ctx.fillText('ONE TAP. ONE EGG. ZERO BRAKES.',W/2,H*0.12);
-
-  ctx.font='900 44px system-ui, Arial';
-  drawTitleStack();
-
-  // equipped skin name + title
-  const sSkin=SKINS[META.skin];
-  ctx.fillStyle=th.ink;
-  ctx.font='900 16px system-ui, Arial';
-  ctx.fillText(sSkin.name,W/2,H*0.52);
-  ctx.globalAlpha=0.7;
-  ctx.font='800 9px system-ui, Arial';
-  ctx.fillText('· '+sSkin.title+' ·',W/2,H*0.548);
-  ctx.globalAlpha=1;
-
-  // picker hint
-  ctx.globalAlpha=0.55;
-  ctx.font='800 9px system-ui, Arial';
-  ctx.fillText('TAP THE EGG TO SWITCH',W/2,H*0.576);
-  ctx.globalAlpha=1;
-
-  // eggdex slots
-  const slotY=H*0.622, slotR=11, gap=30;
-  SKINS.forEach((s,i)=>{
-    const cx=W/2+(i-2)*gap;
-    if (META.isUnlocked(i)) {
-      ctx.fillStyle=i===META.skin?th.padC:th.ink;
-      ctx.beginPath(); ctx.arc(cx,slotY,slotR,0,7); ctx.fill();
-      ctx.fillStyle=i===META.skin?'#5A4410':'#241A4B';
-      ctx.font='900 11px system-ui, Arial';
-      ctx.fillText(String(i+1),cx,slotY+1);
-    } else {
-      ctx.strokeStyle='rgba(120,90,50,.45)';
-      if (game.scene===2||game.scene===4) ctx.strokeStyle='rgba(255,255,255,.45)';
-      ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(cx,slotY,slotR,0,7); ctx.stroke();
-      ctx.fillStyle=ctx.strokeStyle;
-      ctx.font='900 12px system-ui, Arial';
-      ctx.fillText('?',cx,slotY+1);
-    }
-  });
-
-  // collected count + next unlock tease
-  const got=SKINS.filter(s=>META.isUnlocked(s.id)).length;
-  ctx.fillStyle=th.ink;
-  ctx.font='800 11px system-ui, Arial';
-  ctx.fillText(got+' / '+SKINS.length+' EGGS COLLECTED',W/2,H*0.662);
-  const nx=META.nextLocked();
-  ctx.globalAlpha=0.75;
-  ctx.font='800 11px system-ui, Arial';
-  if (nx) {
-    const r=META.remainingTo(nx);
-    ctx.fillText(r.rem+' '+r.label+' TO '+nx.name,W/2,H*0.692);
-  } else {
-    ctx.fillText('ALL EGGS COLLECTED · ABSURD',W/2,H*0.692);
-  }
-  ctx.globalAlpha=1;
-
-  // scene selector
-  const selY=H*0.72;
-  ctx.font='900 18px system-ui, Arial';
-  ctx.fillStyle=th.ink;
-  ctx.fillText(th.name,W/2,selY);
-
-  // arrows
-  ctx.font='900 26px system-ui, Arial';
-  ctx.globalAlpha=0.75;
-  ctx.fillText('\u2039',W*0.22,selY+2);
-  ctx.fillText('\u203A',W*0.78,selY+2);
-  ctx.globalAlpha=1;
-  // dots
-  for (let i=0;i<THEMES.length;i++){
-    ctx.beginPath(); ctx.arc(W/2-28+i*14,selY+26, i===game.scene?4.5:3,0,7);
-    ctx.fillStyle=i===game.scene?th.padC:'rgba(90,60,30,.35)';
-    if (game.scene===2||game.scene===4) ctx.fillStyle=i===game.scene?th.padC:'rgba(255,255,255,.4)';
-    ctx.fill();
-  }
-
-  // start prompt pulses with fake beat
-  const p=0.55+0.45*Math.sin(game.time*4.5);
-  ctx.globalAlpha=p;
-  ctx.font='900 22px system-ui, Arial';
-  ctx.fillStyle=th.ink;
-  ctx.fillText('TAP TO START',W/2,H*0.86);
-  ctx.globalAlpha=1;
-
-  ctx.font='700 12px system-ui, Arial';
-  ctx.globalAlpha=0.7;
-  ctx.fillText('BEST  '+game.best,W/2,H*0.91);
-  ctx.globalAlpha=1;
-
-  // mute
-  drawMuteIcon(W-40,14);
-
-  // register tap zones
-  tapZones=[
-    {x:W/2-78,y:egg.y-66,w:156,h:140,act:'egg'},
-    {x:W*0.22-26,y:selY-22,w:52,h:52,act:'prev'},
-    {x:W*0.78-26,y:selY-22,w:52,h:52,act:'next'},
-    {x:W-48,y:8,w:40,h:30,act:'mute'}
-  ];
-}
-function drawTitleStack(){
-  const th=THEMES[game.scene];
-  const lines=['THIS EGG',"WON'T BREAK"];
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  lines.forEach((ln,i)=>{
-    const y=H*0.16+ i*52;
-    // auto-scale to fit width
-    ctx.font='900 44px system-ui, Arial';
-    const tw=ctx.measureText(ln).width;
-    let fs=44;
-    if (tw>W*0.92) fs=Math.floor(44*W*0.92/tw);
-    ctx.font='900 '+fs+'px system-ui, Arial';
-    ctx.lineWidth=Math.max(4,fs*0.16); ctx.strokeStyle='rgba(0,0,0,.18)';
-    ctx.strokeText(ln,W/2,y);
-    ctx.fillStyle= i? th.padC : th.ink;
-    ctx.fillText(ln,W/2,y);
-  });
-}
-
-/* DEATH CARD */
-function drawDeathCard() {
-  const th=THEMES[game.scene];
-  if (!game.dead.card) return;
-  const a=Math.min(1,(game.dead.t-0.7)/0.4);
-  ctx.save(); ctx.globalAlpha=a;
-  const pw=W*0.84, ph=Math.min(H*0.32,280), px=(W-pw)/2, py=Math.max(8,H*0.1);
-  ctx.fillStyle='rgba(20,14,40,.9)';
-  roundRect(ctx,px,py,pw,ph,22); ctx.fill();
-  ctx.textAlign='center';
-  ctx.fillStyle='#FFD93D';
-  ctx.font='900 24px system-ui, Arial';
-  ctx.fillText(game.dead.msg||'IT IS A PANCAKE NOW.',W/2,py+34);
-  ctx.fillStyle='#fff'; ctx.font='700 13px system-ui, Arial';
-  ctx.fillText(game.dead.sub||'the egg is fine. YOU lost.',W/2,py+60);
-  ctx.font='900 18px system-ui, Arial';
-  ctx.fillText(game.score+'  BOUNCES   \u00B7   BEST  '+game.best,W/2,py+94);
-  if (game.revealCount>0){
-    ctx.fillStyle='#FF7AC4'; ctx.font='800 11px system-ui, Arial';
-    ctx.fillText(game.revealCount+' TIME'+(game.revealCount>1?'S':'')+' THE CHICK CAME OUT',W/2,py+116);
-  }
-  if (game.score>=game.best&&game.score>0){
-    ctx.fillStyle='#7BE0C4'; ctx.font='800 12px system-ui, Arial';
-    ctx.fillText('NEW BEST, LEGEND',W/2,py+130);
-  }
-  const p=0.5+0.5*Math.sin(game.time*5);
-  ctx.globalAlpha=a*p; ctx.fillStyle='#fff'; ctx.font='900 16px system-ui, Arial';
-  ctx.fillText('TAP TO RETRY',W/2,py+ph-30);
-  ctx.restore();
-}
-
-/* NEW EGG UNLOCK CELEBRATION */
-function drawUnlockCard() {
-  const u=game.unlockShow; if(!u) return;
-  const s=SKINS[u.id]; if(!s) return;
-  const pop=Math.min(1,u.t/0.35);
-  const ease=1-Math.pow(1-pop,3);
-  ctx.save();
-  ctx.fillStyle='rgba(10,6,25,.6)';
+/* ---------------- RENDERING ---------------- */
+function drawBG() {
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, COL.bgTop);
+  g.addColorStop(0.5, COL.bgMid);
+  g.addColorStop(1, COL.bgBot);
+  ctx.fillStyle = g;
   ctx.fillRect(0,0,W,H);
-  const pw=W*0.86, ph=Math.min(H*0.5,380);
-  const px=(W-pw)/2, py=H*0.5-ph/2-10;
-  ctx.translate(W/2, py+ph/2);
-  ctx.scale(0.7+0.3*ease,0.7+0.3*ease);
-  ctx.translate(-W/2, -(py+ph/2));
-  // card body
-  ctx.fillStyle='rgba(24,16,52,.96)';
-  roundRect(ctx,px,py,pw,ph,24); ctx.fill();
-  ctx.lineWidth=3; ctx.strokeStyle='#FFD93D';
-  roundRect(ctx,px,py,pw,ph,24); ctx.stroke();
-  // confetti dots on card edge
-  for (let i=0;i<14;i++){
-    const a=i/14*Math.PI*2+u.t*0.6;
-    const cx=px+pw/2+Math.cos(a)*(pw*0.46);
-    const cy=py+ph/2+Math.sin(a)*(ph*0.44);
-    ctx.fillStyle=['#FFD93D','#FF7AC4','#2DE2E6','#7BE0C4'][i%4];
-    ctx.globalAlpha=0.85;
-    ctx.beginPath(); ctx.arc(cx,cy,2.5,0,7); ctx.fill();
+
+  // soft floating clouds
+  ctx.fillStyle = COL.cloud;
+  for (let i=0;i<5;i++) {
+    const cx = ((i*137 + game.t*12) % (W+120)) - 60;
+    const cy = 60 + i*90;
+    cloud(cx, cy, 30+i*4);
   }
-  ctx.globalAlpha=1;
-  ctx.textAlign='center';
-  // header
-  ctx.fillStyle='#FFD93D';
-  ctx.font='900 21px system-ui, Arial';
-  ctx.fillText('NEW EGG FOUND!',W/2,py+38);
-  // mini preview
-  const bob=Math.sin(u.t*3)*4;
+  // ground shadow band
+  const gg = ctx.createLinearGradient(0,H-60,0,H);
+  gg.addColorStop(0,'rgba(255,180,200,0)');
+  gg.addColorStop(1,'rgba(255,160,180,0.25)');
+  ctx.fillStyle = gg;
+  ctx.fillRect(0,H-60,W,60);
+}
+function cloud(x,y,r) {
+  ctx.beginPath();
+  ctx.arc(x,y,r*0.6,0,Math.PI*2);
+  ctx.arc(x+r*0.7,y+4,r*0.5,0,Math.PI*2);
+  ctx.arc(x-r*0.7,y+4,r*0.5,0,Math.PI*2);
+  ctx.arc(x,y+6,r*0.55,0,Math.PI*2);
+  ctx.fill();
+}
+
+function drawEgg(x,y,rx,ry,shell,shade,face,rot,squash) {
+  const sx = 1 + (squash||0);
+  const sy = 1 - (squash||0)*0.7;
   ctx.save();
-  ctx.translate(W/2,py+ph*0.4+bob);
-  ctx.scale(1.25,1.25);
-  const prevSkin=META.skin; META.skin=u.id;
-  drawEggShellOnly();
-  META.skin=prevSkin;
-  ctx.restore();
-  // name + title
-  ctx.fillStyle='#fff';
-  ctx.font='900 20px system-ui, Arial';
-  ctx.fillText(s.name,W/2,py+ph-92);
-  ctx.fillStyle='#FFE88A';
-  ctx.font='800 11px system-ui, Arial';
-  ctx.fillText('· '+s.title+' ·',W/2,py+ph-70);
-  ctx.fillStyle='rgba(255,255,255,.75)';
-  ctx.font='800 10px system-ui, Arial';
-  const got=SKINS.filter(x=>META.isUnlocked(x.id)).length;
-  ctx.fillText('EGGDEX  '+got+' / '+SKINS.length,W/2,py+ph-50);
-  // continue
-  const p=0.5+0.5*Math.sin(game.time*5);
-  ctx.globalAlpha=p;
-  ctx.fillStyle='#fff';
-  ctx.font='900 15px system-ui, Arial';
-  ctx.fillText('TAP TO CONTINUE',W/2,py+ph-24);
+  ctx.translate(x,y);
+  ctx.rotate(rot||0);
+  ctx.scale(sx,sy);
+  // shadow
+  ctx.fillStyle = COL.shadow;
+  ctx.beginPath();
+  ctx.ellipse(0, ry*0.95, rx*0.8, ry*0.18, 0, 0, Math.PI*2);
+  ctx.fill();
+  // body
+  const grd = ctx.createLinearGradient(0,-ry,0,ry);
+  grd.addColorStop(0, shell);
+  grd.addColorStop(1, shade);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);
+  ctx.fill();
+  // highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(-rx*0.3,-ry*0.35,rx*0.28,ry*0.18,-0.4,0,Math.PI*2);
+  ctx.fill();
+  // face
+  drawFace(0,0,rx,ry,face);
   ctx.restore();
 }
 
-/* EGG THOUGHT BUBBLE */
-function drawThought() {
-  if (game.thoughtT<=0||!game.thought) return;
-  const a=Math.min(1,game.thoughtT/0.3);
-  ctx.save();
-  ctx.globalAlpha=a;
-  // clamp bubble to screen edges
-  ctx.font='800 13px system-ui, Arial';
-  const tw=ctx.measureText(game.thought).width+18;
-  const halfW=tw/2+8;
-  let bx=egg.x, by=egg.y-EGG_RY*egg.sy-30;
-  bx=Math.max(halfW, Math.min(W-halfW, bx));
-  by=Math.max(36, by);
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  // little tail
-  ctx.fillStyle='rgba(255,255,255,.92)';
-  ctx.beginPath(); ctx.moveTo(bx-4,by+8); ctx.lineTo(bx+4,by+8); ctx.lineTo(bx,by+16); ctx.fill();
-  roundRect(ctx,bx-tw/2,by-12,tw,22,8); ctx.fill();
-  ctx.fillStyle='#3A2A20';
-  ctx.fillText(game.thought,bx,by-1);
-  ctx.restore();
+function drawFace(ox,oy,rx,ry,face) {
+  const eyeY = -ry*0.1;
+  const eyeX = rx*0.32;
+  // blush
+  ctx.fillStyle = COL.eggBlush;
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath(); ctx.ellipse(-eyeX*1.1, ry*0.18, rx*0.16, ry*0.08, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(eyeX*1.1, ry*0.18, rx*0.16, ry*0.08, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+  // eyes
+  ctx.fillStyle = COL.ink;
+  if (face==='wow') {
+    ctx.beginPath(); ctx.arc(-eyeX, eyeY, rx*0.1, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(eyeX, eyeY, rx*0.1, 0, Math.PI*2); ctx.fill();
+    // open mouth
+    ctx.fillStyle = COL.eggBlush;
+    ctx.beginPath(); ctx.ellipse(0, ry*0.28, rx*0.12, ry*0.1, 0, 0, Math.PI*2); ctx.fill();
+  } else if (face==='love') {
+    heart(-eyeX, eyeY, rx*0.11);
+    heart(eyeX, eyeY, rx*0.11);
+    ctx.strokeStyle = COL.heart; ctx.lineWidth=2; ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(0, ry*0.25, rx*0.1, 0.1*Math.PI, 0.9*Math.PI); ctx.stroke();
+  } else if (face==='ouch') {
+    ctx.lineWidth = 2.5; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-eyeX-rx*0.08, eyeY-ry*0.06); ctx.lineTo(-eyeX+rx*0.08, eyeY+ry*0.06); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-eyeX-rx*0.08, eyeY+ry*0.06); ctx.lineTo(-eyeX+rx*0.08, eyeY-ry*0.06); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(eyeX-rx*0.08, eyeY-ry*0.06); ctx.lineTo(eyeX+rx*0.08, eyeY+ry*0.06); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(eyeX-rx*0.08, eyeY+ry*0.06); ctx.lineTo(eyeX+rx*0.08, eyeY-ry*0.06); ctx.stroke();
+    ctx.fillStyle = COL.ink;
+    ctx.beginPath(); ctx.ellipse(0, ry*0.3, rx*0.1, ry*0.06, 0, 0, Math.PI*2); ctx.fill();
+  } else { // happy
+    ctx.beginPath(); ctx.arc(-eyeX, eyeY, rx*0.08, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(eyeX, eyeY, rx*0.08, 0, Math.PI*2); ctx.fill();
+    // smile
+    ctx.strokeStyle = COL.ink; ctx.lineWidth=2.2; ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(0, ry*0.18, rx*0.22, 0.15*Math.PI, 0.85*Math.PI); ctx.stroke();
+  }
+}
+function heart(x,y,s) {
+  ctx.fillStyle = COL.heart;
+  ctx.beginPath();
+  ctx.moveTo(x, y+s*0.3);
+  ctx.bezierCurveTo(x, y, x-s, y, x-s, y+s*0.3);
+  ctx.bezierCurveTo(x-s, y+s*0.6, x, y+s*0.85, x, y+s*0.85);
+  ctx.bezierCurveTo(x, y+s*0.85, x+s, y+s*0.6, x+s, y+s*0.3);
+  ctx.bezierCurveTo(x+s, y, x, y, x, y+s*0.3);
+  ctx.fill();
 }
 
-/* COMBO COUNTER */
-function drawCombo() {
-  if (game.combo<2||game.comboT<=0) return;
-  const a=Math.min(1,game.comboT);
+function drawItem(it) {
   ctx.save();
-  ctx.globalAlpha=a;
-  ctx.textAlign='right'; ctx.textBaseline='top';
-  ctx.font='900 28px system-ui, Arial';
-  ctx.fillStyle='#FF3DAC';
-  ctx.strokeStyle='rgba(0,0,0,.3)'; ctx.lineWidth=4;
-  ctx.strokeText('x'+game.combo,W-16,42);
-  ctx.fillText('x'+game.combo,W-16,42);
-  ctx.font='700 10px system-ui, Arial';
-  ctx.fillStyle='#fff';
-  ctx.fillText('COMBO',W-16,74);
-  ctx.restore();
-}
-
-/* ============================================================
-   RENDER
-   ============================================================ */
-function render() {
-  tapZones=[];
-  drawBackground();
-
-  const shx=(Math.random()-.5)*game.shake;
-  const shy=(Math.random()-.5)*game.shake;
-
-  // barrel roll rotation
-  const br=game.barrelRoll>0?Math.sin(game.barrelRoll*Math.PI)*0.5:0;
-
-  // chaos events: quake / flip add a small extra random screen tilt
-  let chaosTilt=0, chaosAmt=0;
-  if (game.state===STATE.PLAY){
-    if (game.events.some(e=>e.type==='quake')) chaosAmt=Math.max(chaosAmt,1);
-    if (game.events.some(e=>e.type==='flip'))  chaosAmt=Math.max(chaosAmt,1);
-    if (game.events.some(e=>e.type==='wind'))  chaosAmt=Math.max(chaosAmt,0.4);
-  }
-  if (chaosAmt>0){
-    chaosTilt=(Math.random()-.5)*0.05*chaosAmt;
-  }
-
-  // world transform (zoom + camera + shake + barrel roll + chaos tilt)
-  ctx.save();
-  ctx.translate(W/2,H/2);
-  ctx.rotate(br+chaosTilt);
-  ctx.scale(game.zoom,game.zoom);
-  ctx.translate(-W/2+shx,-H/2+shy);
-  ctx.translate(0,-game.camY);
-
-  // ambient particles are screen-space; bounce particles are world
-  drawWaves();
-  const visiblePads = game.state===STATE.TITLE ? pads.slice(0,1) : pads;
-  for (const pad of visiblePads) drawPad(pad);
-  drawParticles(false);
-  if (game.state===STATE.PLAY) drawAimGuide();
-
-  if (game.state===STATE.REVEAL) drawRevealScene();
-  else if (game.state===STATE.DEAD) drawDeadVisuals();
-  else drawEgg();
-
-  // thought bubble in world space
-  if (game.state===STATE.PLAY) drawThought();
-
-  ctx.restore();
-
-  // rainbow overlay
-  if (game.rainbow>0){
-    ctx.save();
-    ctx.globalAlpha=Math.min(0.25,game.rainbow*0.12);
-    ctx.fillStyle='hsl('+((game.rainbowHue%360)+360)%360+',90%,60%)';
-    ctx.fillRect(0,0,W,H);
-    ctx.restore();
-  }
-
-  // chromatic aberration fringes during chaos events (cheap edge gradients)
-  if (chaosAmt>0 && game.state===STATE.PLAY){
-    const pulse=0.5+0.5*Math.sin(game.time*20);
-    const a=0.10*chaosAmt*(0.6+0.4*pulse);
-    const bw=Math.min(26, W*0.06);
-    ctx.save();
-    let g1=ctx.createLinearGradient(0,0,bw,0);
-    g1.addColorStop(0,'rgba(255,40,80,'+a.toFixed(3)+')');
-    g1.addColorStop(1,'rgba(255,40,80,0)');
-    ctx.fillStyle=g1; ctx.fillRect(0,0,bw,H);
-    let g2=ctx.createLinearGradient(W,0,W-bw,0);
-    g2.addColorStop(0,'rgba(40,220,255,'+a.toFixed(3)+')');
-    g2.addColorStop(1,'rgba(40,220,255,0)');
-    ctx.fillStyle=g2; ctx.fillRect(W-bw,0,bw,H);
-    // tiny vertical jitter fringe top/bottom when flip is on
-    if (game.events.some(e=>e.type==='flip')){
-      let g3=ctx.createLinearGradient(0,0,0,bw);
-      g3.addColorStop(0,'rgba(180,80,255,'+a.toFixed(3)+')');
-      g3.addColorStop(1,'rgba(180,80,255,0)');
-      ctx.fillStyle=g3; ctx.fillRect(0,0,W,bw);
-      let g4=ctx.createLinearGradient(0,H,0,H-bw);
-      g4.addColorStop(0,'rgba(255,220,40,'+a.toFixed(3)+')');
-      g4.addColorStop(1,'rgba(255,220,40,0)');
-      ctx.fillStyle=g4; ctx.fillRect(0,H-bw,W,bw);
+  ctx.translate(it.x, it.y);
+  ctx.rotate(it.rot);
+  if (it.type==='egg') {
+    drawEgg(0,0,it.r,it.r*1.25,COL.eggShell,COL.eggShade,'happy',0,0);
+  } else if (it.type==='gold') {
+    drawEgg(0,0,it.r,it.r*1.25,COL.gold,COL.goldShade,'wow',0,0);
+    // sparkles
+    ctx.fillStyle = '#FFF';
+    const t = game.t*4;
+    for (let i=0;i<3;i++) {
+      const a = t + i*2.1;
+      const rr = it.r*0.9;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a)*rr, Math.sin(a)*rr, 2, 0, Math.PI*2);
+      ctx.fill();
     }
-    ctx.restore();
+  } else if (it.type==='heart') {
+    heart(0,0,it.r*0.9);
+    // shine
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(-it.r*0.3, -it.r*0.2, it.r*0.18, it.r*0.1, -0.5, 0, Math.PI*2);
+    ctx.fill();
+  } else if (it.type==='bomb') {
+    // body
+    const grd = ctx.createRadialGradient(-it.r*0.3,-it.r*0.3,2,0,0,it.r);
+    grd.addColorStop(0,'#6A6A7A');
+    grd.addColorStop(1,COL.bombShade);
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(0,0,it.r,0,Math.PI*2);
+    ctx.fill();
+    // fuse
+    ctx.strokeStyle = COL.bombFuse; ctx.lineWidth=3; ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(it.r*0.4,-it.r*0.6);
+    ctx.quadraticCurveTo(it.r*0.9,-it.r*1.1, it.r*0.6,-it.r*1.3);
+    ctx.stroke();
+    // spark
+    const sp = 3+Math.sin(game.t*20)*2;
+    ctx.fillStyle = '#FFE066';
+    ctx.beginPath(); ctx.arc(it.r*0.6,-it.r*1.35,sp,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#FFF';
+    ctx.beginPath(); ctx.arc(it.r*0.6,-it.r*1.35,sp*0.5,0,Math.PI*2); ctx.fill();
+    // eyes (angry)
+    ctx.fillStyle = '#FFF';
+    ctx.beginPath(); ctx.arc(-it.r*0.3,-it.r*0.1,it.r*0.22,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(it.r*0.3,-it.r*0.1,it.r*0.22,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#FF4444';
+    ctx.beginPath(); ctx.arc(-it.r*0.3,-it.r*0.1,it.r*0.11,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(it.r*0.3,-it.r*0.1,it.r*0.11,0,Math.PI*2); ctx.fill();
   }
+  ctx.restore();
+}
 
-  // screen-space ambient
-  drawParticles(true);
-
-  if (game.state===STATE.TITLE) drawTitle();
-  else {
-    drawHUD();
-    drawCombo();
-    tapZones.push({x:W-48,y:8,w:40,h:30,act:'mute'});
-    drawBanner();
-    if (game.state===STATE.DEAD) drawDeathCard();
-    if (game.unlockShow) drawUnlockCard();
+function drawParts() {
+  for (const p of game.parts) {
+    const a = 1 - p.life/p.max;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.c;
+    if (p.kind==='heart') {
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+      heart(0,0,p.sz*2);
+      ctx.restore();
+    } else if (p.kind==='star') {
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+      star(0,0,p.sz*1.5,p.sz*0.7,5);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.sz,0,Math.PI*2);
+      ctx.fill();
+    }
   }
+  ctx.globalAlpha = 1;
+}
+function star(cx,cy,r1,r2,n) {
+  ctx.beginPath();
+  for (let i=0;i<n*2;i++) {
+    const r = i%2?r2:r1;
+    const a = -Math.PI/2 + i*Math.PI/n;
+    const x = cx+Math.cos(a)*r, y = cy+Math.sin(a)*r;
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+}
+function drawPuffs() {
+  for (const p of game.puffs) {
+    const a = 1 - p.life/p.max;
+    ctx.globalAlpha = a*0.5;
+    ctx.fillStyle = p.c;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
 
-  // flash
-  if (game.flash>0){
-    ctx.fillStyle='rgba(255,255,255,'+Math.max(0,game.flash)+')';
-    ctx.fillRect(0,0,W,H);
+function drawHUD() {
+  // top bar
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  roundRect(12, 12, W-24, 56, 18);
+  ctx.fill();
+  // score
+  ctx.fillStyle = COL.ink;
+  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(game.score), 26, 40);
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = COL.ink+'99';
+  ctx.fillText('SCORE', 26, 56);
+  // combo
+  if (game.combo > 1) {
+    ctx.fillStyle = COL.goldShade;
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('x'+game.combo, W/2, 36);
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillStyle = COL.ink+'99';
+    ctx.fillText('COMBO', W/2, 56);
+  }
+  // lives
+  for (let i=0;i<5;i++) {
+    const lx = W-30-i*22, ly = 40;
+    if (i < game.lives) {
+      ctx.fillStyle = COL.heart;
+      heart(lx, ly, 8);
+    } else {
+      ctx.strokeStyle = COL.heart+'88'; ctx.lineWidth=1.5;
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      heart(lx, ly, 8);
+      ctx.globalAlpha=0.4;
+      ctx.beginPath();
+      ctx.arc(lx,ly,9,0,Math.PI*2);
+      ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+  }
+  // best small
+  ctx.textAlign = 'left';
+  ctx.fillStyle = COL.ink+'88';
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillText('BEST '+game.best, 26, 72);
+}
+
+function roundRect(x,y,w,h,r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function drawTitle() {
+  drawBG();
+  // big egg
+  const bob = Math.sin(game.t*2)*8;
+  drawEgg(W/2, H*0.36+bob, 56, 72, COL.eggShell, COL.eggShade, 'happy', 0, Math.sin(game.t*4)*0.04);
+  // title text
+  ctx.textAlign='center';
+  ctx.fillStyle = COL.ink;
+  ctx.font = 'bold 40px system-ui, sans-serif';
+  ctx.fillText('EGG CATCH', W/2, H*0.55);
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillStyle = COL.ink+'AA';
+  ctx.fillText('Catch the eggs. Dodge the bombs.', W/2, H*0.55+28);
+  // tap hint
+  const pulse = 0.5+0.5*Math.sin(game.t*3);
+  ctx.globalAlpha = 0.5+0.5*pulse;
+  ctx.fillStyle = COL.ink;
+  ctx.font = 'bold 18px system-ui, sans-serif';
+  ctx.fillText('TAP TO PLAY', W/2, H*0.72);
+  ctx.globalAlpha = 1;
+  // best
+  if (game.best>0) {
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.fillStyle = COL.goldShade;
+    ctx.fillText('BEST: '+game.best, W/2, H*0.82);
   }
 }
 
-/* ============================================================
-   MAIN LOOP
-   ============================================================ */
-let last=performance.now();
-function frame(now){
-  let dt=(now-last)/1000;
-last=now;
-dt=Math.max(0, Math.min(dt,0.033));
-  try {
-    update(dt);
-    render();
-  } catch(err) {
-    if (window.L) window.L('ERR '+err.message+' @ '+(err.stack||'').split('\n')[1]);
+function drawOver() {
+  // dim
+  ctx.fillStyle = 'rgba(90,74,82,0.55)';
+  ctx.fillRect(0,0,W,H);
+  // card
+  ctx.fillStyle = COL.soft;
+  roundRect(W*0.12, H*0.25, W*0.76, H*0.5, 28);
+  ctx.fill();
+  // title
+  ctx.textAlign='center';
+  ctx.fillStyle = COL.ink;
+  ctx.font = 'bold 32px system-ui, sans-serif';
+  ctx.fillText('GAME OVER', W/2, H*0.25+60);
+  // score
+  ctx.font = 'bold 48px system-ui, sans-serif';
+  ctx.fillStyle = COL.goldShade;
+  ctx.fillText(String(game.score), W/2, H*0.25+120);
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillStyle = COL.ink+'99';
+  ctx.fillText('SCORE', W/2, H*0.25+145);
+  // best
+  ctx.font = '15px system-ui, sans-serif';
+  ctx.fillStyle = COL.ink;
+  const isNew = game.score >= game.best && game.score>0;
+  ctx.fillText(isNew ? '✨ NEW BEST! ✨' : 'Best: '+game.best, W/2, H*0.25+180);
+  // tap hint
+  const pulse = 0.5+0.5*Math.sin(game.t*3);
+  ctx.globalAlpha = 0.5+0.5*pulse;
+  ctx.fillStyle = COL.ink;
+  ctx.font = 'bold 17px system-ui, sans-serif';
+  ctx.fillText('TAP TO PLAY AGAIN', W/2, H*0.25+230);
+  ctx.globalAlpha = 1;
+}
+
+function render() {
+  game.t += 0.016;
+  ctx.save();
+  // shake
+  if (game.shake > 0.2) {
+    ctx.translate((Math.random()-0.5)*game.shake, (Math.random()-0.5)*game.shake);
   }
+  drawBG();
+  if (game.state===STATE.TITLE) {
+    drawTitle();
+    ctx.restore();
+    return;
+  }
+  // puffs behind items
+  drawPuffs();
+  // items
+  for (const it of game.items) drawItem(it);
+  // player
+  drawEgg(player.x, player.y, player.rx, player.ry, COL.eggShell, COL.eggShade, player.face, 0, player.squash);
+  // particles
+  drawParts();
+  // flash
+  if (game.flash > 0.01) {
+    ctx.fillStyle = 'rgba(255,255,255,'+game.flash*0.6+')';
+    ctx.fillRect(0,0,W,H);
+  }
+  ctx.restore();
+  // HUD (no shake)
+  if (game.state===STATE.PLAY) drawHUD();
+  if (game.state===STATE.OVER) drawOver();
+}
+
+/* ---------------- LOOP ---------------- */
+let last = performance.now();
+function frame(now) {
+  let dt = (now - last)/1000;
+  last = now;
+  dt = Math.min(dt, 0.033);
+  update(dt);
+  render();
   requestAnimationFrame(frame);
 }
-resetEgg();
-initPads();
 requestAnimationFrame(frame);
-if (location.search.indexOf('dbg')>=0) {
-  window.__LOG = [];
-  window.L = function(s){ window.__LOG.push((window.performance.now()|0)+': '+s);
-                          if (window.__LOG.length>80) window.__LOG.shift(); };
-  window.__E = {egg:egg, game:game, pads:pads, AU:AU};
-}
-
-/* triple safety net: ensure the loop is alive even on wake */
-document.addEventListener('visibilitychange',()=>{ last=performance.now(); resize(); });
-setTimeout(()=>{ last=performance.now(); },500);
-window.addEventListener('focus',()=>{ last=performance.now(); });
 </script>
 </body>
 </html>
